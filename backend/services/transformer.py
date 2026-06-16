@@ -1,3 +1,4 @@
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,21 @@ OUTPUT_COLUMNS = [
     "Active",
 ]
 
+FALLBACK_COLUMN_DEFAULTS = {
+    "Customer": {"default_value": "NA", "value_type": "string"},
+    "Product": {"default_value": "NA", "value_type": "string"},
+    "Doc Class": {"default_value": "NA", "value_type": "string"},
+    "Customer Code": {"default_value": "NA", "value_type": "string"},
+    "Product Name": {"default_value": "NA", "value_type": "string"},
+    "Account Type": {"default_value": "NA", "value_type": "string"},
+    "Bank Code": {"default_value": "NA", "value_type": "string"},
+    "SI Number": {"default_value": "NA", "value_type": "string"},
+    "Order Number": {"default_value": "NA", "value_type": "string"},
+    "Class": {"default_value": "0", "value_type": "int"},
+    "Order Date": {"default_value": "NA", "value_type": "string"},
+    "Active": {"default_value": "1", "value_type": "int"},
+}
+
 
 @dataclass
 class TransformResult:
@@ -42,21 +58,16 @@ class DataTransformer:
     """Apply the fixed Mosaic POS to ERP mapping."""
 
     def transform(self, input_df: pd.DataFrame) -> TransformResult:
+        defaults = _load_column_defaults()
         records: list[dict[str, Any]] = []
         warnings = [
-            "Customer defaulted to NA",
-            "Product defaulted to NA",
-            "Doc Class defaulted to NA",
-            "Customer Code defaulted to NA",
-            "Product Name defaulted to NA",
-            "Account Type defaulted to NA",
-            "Bank Code defaulted to NA",
-            "Class defaulted to 0",
+            f"{column_name} defaulted to {_display_default_value(default_value)}"
+            for column_name, default_value in defaults.items()
         ]
         errors: list[str] = []
 
         for output_row_index, (_, row) in enumerate(input_df.iterrows(), start=1):
-            record = self._default_record()
+            record = self._default_record(defaults)
 
             record["Date"] = self._parse_date_for_row(row, output_row_index, warnings)
             record["Total Amount"] = self._parse_float_for_row(
@@ -92,29 +103,29 @@ class DataTransformer:
             error_count=len(errors),
             warnings=_deduplicate_warnings(warnings),
             errors=errors,
-            column_summary=self._build_column_summary(),
+            column_summary=self._build_column_summary(defaults),
         )
 
-    def _default_record(self) -> dict[str, Any]:
+    def _default_record(self, defaults: dict[str, Any]) -> dict[str, Any]:
         return {
-            "Customer": "NA",
-            "Product": "NA",
+            "Customer": defaults["Customer"],
+            "Product": defaults["Product"],
             "Quantity": 1,
             "Price": 0.0,
             "Date": _today_string(),
-            "Doc Class": "NA",
-            "Customer Code": "NA",
-            "Product Name": "NA",
-            "Account Type": "NA",
+            "Doc Class": defaults["Doc Class"],
+            "Customer Code": defaults["Customer Code"],
+            "Product Name": defaults["Product Name"],
+            "Account Type": defaults["Account Type"],
             "Total Amount": 0.0,
             "Vat Payable": 0.0,
-            "Bank Code": "NA",
+            "Bank Code": defaults["Bank Code"],
             "Remarks": "",
-            "SI Number": "NA",
-            "Order Number": "NA",
-            "Class": 0,
-            "Order Date": "NA",
-            "Active": 1,
+            "SI Number": defaults["SI Number"],
+            "Order Number": defaults["Order Number"],
+            "Class": defaults["Class"],
+            "Order Date": defaults["Order Date"],
+            "Active": defaults["Active"],
         }
 
     def _parse_date_for_row(
@@ -163,26 +174,74 @@ class DataTransformer:
             return ""
         return str(value).strip()
 
-    def _build_column_summary(self) -> list[dict]:
+    def _build_column_summary(self, defaults: dict[str, Any]) -> list[dict]:
         summary_by_column = {
-            "Customer": {"source": "None -> NA", "status": "defaulted"},
-            "Product": {"source": "None -> NA", "status": "defaulted"},
+            "Customer": {
+                "source": f"None -> {_display_default_value(defaults['Customer'])}",
+                "status": "defaulted",
+            },
+            "Product": {
+                "source": f"None -> {_display_default_value(defaults['Product'])}",
+                "status": "defaulted",
+            },
             "Quantity": {"source": "Hardcoded 1", "status": "hardcoded"},
             "Price": {"source": 'input_df["Net Sales"]', "status": "mapped"},
             "Date": {"source": 'input_df["Date"]', "status": "mapped"},
-            "Doc Class": {"source": "None -> NA", "status": "defaulted"},
-            "Customer Code": {"source": "None -> NA", "status": "defaulted"},
-            "Product Name": {"source": "None -> NA", "status": "defaulted"},
-            "Account Type": {"source": "None -> NA", "status": "defaulted"},
+            "Doc Class": {
+                "source": f"None -> {_display_default_value(defaults['Doc Class'])}",
+                "status": "defaulted",
+            },
+            "Customer Code": {
+                "source": (
+                    "None -> "
+                    f"{_display_default_value(defaults['Customer Code'])}"
+                ),
+                "status": "defaulted",
+            },
+            "Product Name": {
+                "source": (
+                    "None -> "
+                    f"{_display_default_value(defaults['Product Name'])}"
+                ),
+                "status": "defaulted",
+            },
+            "Account Type": {
+                "source": (
+                    "None -> "
+                    f"{_display_default_value(defaults['Account Type'])}"
+                ),
+                "status": "defaulted",
+            },
             "Total Amount": {"source": 'input_df["Gross Sales"]', "status": "mapped"},
             "Vat Payable": {"source": 'input_df["VAT"]', "status": "mapped"},
-            "Bank Code": {"source": "None -> NA", "status": "defaulted"},
+            "Bank Code": {
+                "source": f"None -> {_display_default_value(defaults['Bank Code'])}",
+                "status": "defaulted",
+            },
             "Remarks": {"source": 'input_df["Remarks"]', "status": "mapped"},
-            "SI Number": {"source": "None -> NA", "status": "defaulted"},
-            "Order Number": {"source": "None -> NA", "status": "defaulted"},
-            "Class": {"source": "None -> 0", "status": "defaulted"},
-            "Order Date": {"source": "None -> NA", "status": "defaulted"},
-            "Active": {"source": "Hardcoded 1", "status": "hardcoded"},
+            "SI Number": {
+                "source": f"None -> {_display_default_value(defaults['SI Number'])}",
+                "status": "defaulted",
+            },
+            "Order Number": {
+                "source": (
+                    "None -> "
+                    f"{_display_default_value(defaults['Order Number'])}"
+                ),
+                "status": "defaulted",
+            },
+            "Class": {
+                "source": f"None -> {_display_default_value(defaults['Class'])}",
+                "status": "defaulted",
+            },
+            "Order Date": {
+                "source": f"None -> {_display_default_value(defaults['Order Date'])}",
+                "status": "defaulted",
+            },
+            "Active": {
+                "source": f"None -> {_display_default_value(defaults['Active'])}",
+                "status": "defaulted",
+            },
         }
 
         return [
@@ -207,6 +266,64 @@ def parse_date_flexible(val) -> str:
     if parsed_date is None:
         return _today_string()
     return parsed_date
+
+
+def _load_column_defaults() -> dict[str, Any]:
+    defaults = _fallback_defaults()
+
+    try:
+        from database import get_column_defaults, get_db
+
+        with closing(get_db()) as conn:
+            rows = get_column_defaults(conn)
+    except Exception:
+        return defaults
+
+    for row in rows:
+        column_name = str(row.get("column_name") or "")
+        if column_name not in defaults:
+            continue
+
+        value_type = str(
+            row.get("value_type")
+            or FALLBACK_COLUMN_DEFAULTS[column_name]["value_type"]
+        )
+        defaults[column_name] = _coerce_default_value(
+            row.get("default_value"),
+            value_type,
+            defaults[column_name],
+        )
+
+    return defaults
+
+
+def _fallback_defaults() -> dict[str, Any]:
+    return {
+        column_name: _coerce_default_value(
+            item["default_value"],
+            item["value_type"],
+            item["default_value"],
+        )
+        for column_name, item in FALLBACK_COLUMN_DEFAULTS.items()
+    }
+
+
+def _coerce_default_value(value: Any, value_type: str, fallback: Any) -> Any:
+    if value_type == "int":
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError):
+            return fallback
+    if value_type == "float":
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return fallback
+    return "" if value is None else str(value)
+
+
+def _display_default_value(value: Any) -> str:
+    return str(value)
 
 
 def _try_parse_float(val: Any) -> tuple[float, bool]:

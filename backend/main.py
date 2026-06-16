@@ -32,4 +32,4 @@ async def health_check() -> dict[str, str]:
 
 
 app.include_router(root_router)
-app.include_router(api_router)
+app.include_router(api_router, prefix="/api")

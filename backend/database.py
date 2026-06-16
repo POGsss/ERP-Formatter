@@ -29,6 +29,81 @@ AUDIT_COLUMNS = {
     "created_at",
 }
 
+SEEDED_COLUMN_DEFAULTS = [
+    {
+        "column_name": "Customer",
+        "default_value": "NA",
+        "value_type": "string",
+        "description": "Default customer value used when POS has no customer data.",
+    },
+    {
+        "column_name": "Product",
+        "default_value": "NA",
+        "value_type": "string",
+        "description": "Default product value used when POS has no product data.",
+    },
+    {
+        "column_name": "Doc Class",
+        "default_value": "NA",
+        "value_type": "string",
+        "description": "Default ERP document class.",
+    },
+    {
+        "column_name": "Customer Code",
+        "default_value": "NA",
+        "value_type": "string",
+        "description": "Default ERP customer code.",
+    },
+    {
+        "column_name": "Product Name",
+        "default_value": "NA",
+        "value_type": "string",
+        "description": "Default ERP product name.",
+    },
+    {
+        "column_name": "Account Type",
+        "default_value": "NA",
+        "value_type": "string",
+        "description": "Default ERP account type.",
+    },
+    {
+        "column_name": "Bank Code",
+        "default_value": "NA",
+        "value_type": "string",
+        "description": "Default ERP bank code.",
+    },
+    {
+        "column_name": "SI Number",
+        "default_value": "NA",
+        "value_type": "string",
+        "description": "Default ERP sales invoice number.",
+    },
+    {
+        "column_name": "Order Number",
+        "default_value": "NA",
+        "value_type": "string",
+        "description": "Default ERP order number.",
+    },
+    {
+        "column_name": "Class",
+        "default_value": "0",
+        "value_type": "int",
+        "description": "Default ERP class value.",
+    },
+    {
+        "column_name": "Order Date",
+        "default_value": "NA",
+        "value_type": "string",
+        "description": "Default ERP order date value.",
+    },
+    {
+        "column_name": "Active",
+        "default_value": "1",
+        "value_type": "int",
+        "description": "Default active flag for ERP imports.",
+    },
+]
+
 
 def get_db() -> sqlite3.Connection:
     db_path = Path(DATABASE_URL)
@@ -73,6 +148,18 @@ def init_db() -> None:
             )
             """
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS column_defaults (
+                column_name TEXT PRIMARY KEY,
+                default_value TEXT NOT NULL,
+                value_type TEXT NOT NULL,
+                description TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        _seed_column_defaults(connection)
         connection.commit()
 
 
@@ -139,17 +226,83 @@ def get_upload(conn: sqlite3.Connection, upload_id: int) -> dict[str, Any] | Non
 def get_recent_uploads(
     conn: sqlite3.Connection,
     limit: int = 20,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT *
         FROM uploads
         ORDER BY uploaded_at DESC, id DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (limit,),
+        (limit, offset),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def count_uploads(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT COUNT(*) AS total FROM uploads").fetchone()
+    return int(row["total"])
+
+
+def get_column_defaults(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT column_name, default_value, value_type, description, updated_at
+        FROM column_defaults
+        ORDER BY
+            CASE column_name
+                WHEN 'Customer' THEN 1
+                WHEN 'Product' THEN 2
+                WHEN 'Doc Class' THEN 3
+                WHEN 'Customer Code' THEN 4
+                WHEN 'Product Name' THEN 5
+                WHEN 'Account Type' THEN 6
+                WHEN 'Bank Code' THEN 7
+                WHEN 'SI Number' THEN 8
+                WHEN 'Order Number' THEN 9
+                WHEN 'Class' THEN 10
+                WHEN 'Order Date' THEN 11
+                WHEN 'Active' THEN 12
+                ELSE 99
+            END,
+            column_name
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_column_default(
+    conn: sqlite3.Connection,
+    column_name: str,
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT column_name, default_value, value_type, description, updated_at
+        FROM column_defaults
+        WHERE column_name = ?
+        """,
+        (column_name,),
+    ).fetchone()
+    return _row_to_dict(row)
+
+
+def update_column_default(
+    conn: sqlite3.Connection,
+    column_name: str,
+    default_value: str,
+) -> dict[str, Any] | None:
+    conn.execute(
+        """
+        UPDATE column_defaults
+        SET default_value = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE column_name = ?
+        """,
+        (default_value, column_name),
+    )
+    conn.commit()
+    return get_column_default(conn, column_name)
 
 
 def _validate_columns(data: dict[str, Any], allowed_columns: set[str]) -> None:
@@ -170,3 +323,24 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return dict(row)
+
+
+def _seed_column_defaults(conn: sqlite3.Connection) -> None:
+    for item in SEEDED_COLUMN_DEFAULTS:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO column_defaults (
+                column_name,
+                default_value,
+                value_type,
+                description
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                item["column_name"],
+                item["default_value"],
+                item["value_type"],
+                item["description"],
+            ),
+        )

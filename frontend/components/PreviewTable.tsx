@@ -1,13 +1,11 @@
 import type { ColumnSummaryItem } from "../types";
+import { TableFrame, TableHeaderCell } from "./ui";
 
 interface PreviewTableProps {
   preview: Record<string, any>[];
   columnSummary: ColumnSummaryItem[];
   totalRows?: number;
 }
-
-const BLUE_HEADER = "#2E75B6";
-const YELLOW_HEADER = "#FFEB9C";
 
 function displayValue(value: unknown): string {
   if (value === null || value === undefined) {
@@ -47,18 +45,17 @@ export function PreviewTable({
         <div>
           <h2
             id="preview-title"
-            className="text-lg font-semibold text-slate-950"
+            className="text-base font-semibold text-black"
           >
             Output Preview
           </h2>
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-zinc-600">
             Showing {shownRows} of {rowTotal} rows
           </p>
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
-        <div className="max-h-[520px] overflow-auto">
+      <TableFrame>
           <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
             <thead className="sticky top-0 z-10">
               <tr>
@@ -67,19 +64,11 @@ export function PreviewTable({
                   const isDefaulted = status === "defaulted";
 
                   return (
-                    <th
-                      key={column}
-                      scope="col"
-                      className="whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 font-semibold"
-                      style={{
-                        backgroundColor: isDefaulted
-                          ? YELLOW_HEADER
-                          : BLUE_HEADER,
-                        color: isDefaulted ? "#1F2937" : "#FFFFFF",
-                      }}
-                    >
-                      {column}
-                    </th>
+                    <TableHeaderCell key={column}>
+                      <span className={isDefaulted ? "text-zinc-300" : ""}>
+                        {column}
+                      </span>
+                    </TableHeaderCell>
                   );
                 })}
               </tr>
@@ -89,7 +78,7 @@ export function PreviewTable({
               {preview.length === 0 ? (
                 <tr>
                   <td
-                    className="px-3 py-6 text-center text-sm text-slate-500"
+                    className="px-3 py-10 text-center text-sm font-medium text-zinc-500"
                     colSpan={Math.max(columns.length, 1)}
                   >
                     No preview rows returned.
@@ -97,7 +86,7 @@ export function PreviewTable({
                 </tr>
               ) : (
                 preview.map((row, rowIndex) => (
-                  <tr key={rowIndex} className="even:bg-slate-50">
+                  <tr key={rowIndex} className="bg-white hover:bg-zinc-50">
                     {columns.map((column) => {
                       const value = row[column];
                       const isDefaultedColumn =
@@ -108,12 +97,9 @@ export function PreviewTable({
                       return (
                         <td
                           key={`${rowIndex}-${column}`}
-                          className="whitespace-nowrap border-b border-r border-slate-100 px-3 py-2 text-slate-800"
-                          style={{
-                            backgroundColor: highlightCell
-                              ? YELLOW_HEADER
-                              : undefined,
-                          }}
+                          className={`whitespace-nowrap border-b border-r border-zinc-100 px-3 py-2 text-zinc-800 last:border-r-0 ${
+                            highlightCell ? "font-semibold text-black" : ""
+                          }`}
                         >
                           {displayValue(value)}
                         </td>
@@ -124,8 +110,7 @@ export function PreviewTable({
               )}
             </tbody>
           </table>
-        </div>
-      </div>
+      </TableFrame>
     </section>
   );
 }

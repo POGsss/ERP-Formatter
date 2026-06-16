@@ -10,6 +10,7 @@ interface UploadFormProps {
 
 const MAX_FILE_SIZE_MB = 10;
 const ALLOWED_TYPES = [".xlsx", ".xls", ".csv"];
+const DEFAULT_SOURCE_SYSTEM = "Mosaic POS";
 
 function todayInputValue(): string {
   const now = new Date();
@@ -50,8 +51,6 @@ async function getErrorMessage(response: Response): Promise<string> {
 
 export function UploadForm({ onUploadComplete }: UploadFormProps) {
   const [file, setFile] = useState<File | null>(null);
-  const [sourceSystem, setSourceSystem] = useState("Mosaic POS");
-  const [transactionDate, setTransactionDate] = useState(todayInputValue());
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState("");
 
@@ -80,10 +79,8 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
 
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("source_system", sourceSystem.trim() || "Unknown");
-    if (transactionDate) {
-      formData.append("transaction_date", transactionDate);
-    }
+    formData.append("source_system", DEFAULT_SOURCE_SYSTEM);
+    formData.append("transaction_date", todayInputValue());
 
     setIsUploading(true);
     setError("");
@@ -115,33 +112,6 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
         maxSizeMB={MAX_FILE_SIZE_MB}
         onFileSelect={handleFileSelect}
       />
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">
-            Source system
-          </span>
-          <input
-            type="text"
-            value={sourceSystem}
-            onChange={(event) => setSourceSystem(event.target.value)}
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            placeholder="Mosaic POS"
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">
-            Transaction date
-          </span>
-          <input
-            type="date"
-            value={transactionDate}
-            onChange={(event) => setTransactionDate(event.target.value)}
-            className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-          />
-        </label>
-      </div>
 
       {error ? (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">

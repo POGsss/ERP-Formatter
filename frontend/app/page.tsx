@@ -1,18 +1,43 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { ColumnSummaryPanel } from "../components/ColumnSummaryPanel";
-import { DownloadPanel } from "../components/DownloadPanel";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { DropZone } from "../components/DropZone";
 import { MappingReviewTable } from "../components/MappingReviewTable";
 import { PreviewTable } from "../components/PreviewTable";
-import { UploadForm } from "../components/UploadForm";
+import {
+  RecentUploadPanel,
+  type RecentUploadItem,
+} from "../components/RecentUploadPanel";
+import { UploadSummaryPanel } from "../components/UploadSummaryPanel";
+import {
+  ActionButton,
+  AppShell,
+  EmptyState,
+  Message,
+  Panel,
+  StatCard,
+} from "../components/ui";
 import type { MappingItem, SuggestionItem, UploadResult } from "../types";
 
 const MAX_FILE_SIZE_MB = 10;
 const ALLOWED_TYPES = [".xlsx", ".xls", ".csv"];
+const PAGE_SIZE = 6;
+const DEFAULT_SOURCE_SYSTEM = "Mosaic POS";
+const UPLOAD_FORM_ID = "erp-upload-form";
 
-type UploadMode = "standard" | "custom";
+type UploadMode = "standard" | "template";
+
+interface AdminStats {
+  uploads_today: number;
+  uploads_this_month: number;
+  errors_today: number;
+  total_rows_processed: number;
+}
+
+interface UploadsResponse {
+  uploads: RecentUploadItem[];
+  total: number;
+}
 
 interface SuggestionResult {
   mode: "suggestion";
@@ -21,9 +46,34 @@ interface SuggestionResult {
   suggestions: SuggestionItem[];
 }
 
+const DEFAULT_STATS: AdminStats = {
+  uploads_today: 0,
+  uploads_this_month: 0,
+  errors_today: 0,
+  total_rows_processed: 0,
+};
+
+function todayInputValue(): string {
+  const now = new Date();
+  const timezoneOffsetMs = now.getTimezoneOffset() * 60 * 1000;
+  return new Date(now.getTime() - timezoneOffsetMs).toISOString().slice(0, 10);
+}
+
 function isAllowedFile(file: File): boolean {
   const fileName = file.name.toLowerCase();
   return ALLOWED_TYPES.some((type) => fileName.endsWith(type));
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat().format(value);
 }
 
 async function getErrorMessage(response: Response): Promise<string> {
@@ -52,180 +102,124 @@ async function getErrorMessage(response: Response): Promise<string> {
   return "Request failed. Please try again.";
 }
 
+function uploadResultToRecent(
+  result: UploadResult,
+  fallbackName: string,
+  sourceSystem: string,
+  transactionDate: string,
+): RecentUploadItem {
+  return {
+    id: result.upload_id,
+    original_name:
+      "original_filename" in result && typeof result.original_filename === "string"
+        ? result.original_filename
+        : fallbackName,
+    source_system: sourceSystem,
+    transaction_date: transactionDate,
+    uploaded_at: new Date().toISOString(),
+    status: result.status,
+    row_count: result.row_count,
+    error_count: result.error_count,
+    download_url: result.download_url,
+    error_report_url: result.error_report_url,
+  };
+}
+
 export default function HomePage() {
   const [mode, setMode] = useState<UploadMode>("standard");
-  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
-
-  const changeMode = (nextMode: UploadMode) => {
-    setMode(nextMode);
-    setUploadResult(null);
-  };
-
-  return (
-    <div className="min-h-[calc(100vh-3.5rem)]">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-6xl px-6 py-8">
-          <h1 className="text-3xl font-semibold tracking-normal text-slate-950">
-            ERP Excel Formatter
-          </h1>
-          <p className="mt-2 text-base text-slate-600">
-            Mosaic POS - ERP Import
-          </p>
-        </div>
-      </header>
-
-      <section className="border-b border-slate-200 bg-slate-50">
-        <div className="mx-auto max-w-6xl px-6 py-8">
-          <div className="mb-4">
-            <h2 className="text-xl font-semibold text-slate-950">Upload</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Add the POS export, label the source, and format it for ERP import.
-            </p>
-          </div>
-          <div className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-            <div
-              role="radiogroup"
-              aria-label="Upload mode"
-              className="mb-5 inline-flex rounded-md border border-slate-300 bg-slate-100 p-1"
-            >
-              <button
-                type="button"
-                role="radio"
-                aria-checked={mode === "standard"}
-                onClick={() => changeMode("standard")}
-                className={`inline-flex min-h-10 items-center rounded px-4 py-2 text-sm font-semibold transition ${
-                  mode === "standard"
-                    ? "bg-white text-blue-700 shadow-sm"
-                    : "text-slate-600 hover:text-slate-950"
-                }`}
-              >
-                <span
-                  className={`mr-2 h-2.5 w-2.5 rounded-full ${
-                    mode === "standard" ? "bg-blue-700" : "bg-slate-300"
-                  }`}
-                  aria-hidden="true"
-                />
-                Standard Mode
-              </button>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={mode === "custom"}
-                onClick={() => changeMode("custom")}
-                className={`inline-flex min-h-10 items-center rounded px-4 py-2 text-sm font-semibold transition ${
-                  mode === "custom"
-                    ? "bg-white text-blue-700 shadow-sm"
-                    : "text-slate-600 hover:text-slate-950"
-                }`}
-              >
-                <span
-                  className={`mr-2 h-2.5 w-2.5 rounded-full ${
-                    mode === "custom" ? "bg-blue-700" : "bg-slate-300"
-                  }`}
-                  aria-hidden="true"
-                />
-                Custom Template Mode
-              </button>
-            </div>
-
-            {mode === "standard" ? (
-              <UploadForm onUploadComplete={setUploadResult} />
-            ) : (
-              <CustomTemplateForm
-                onResetResult={() => setUploadResult(null)}
-                onUploadComplete={setUploadResult}
-              />
-            )}
-          </div>
-        </div>
-      </section>
-
-      {uploadResult ? (
-        <section className="bg-white">
-          <div className="mx-auto max-w-6xl space-y-6 px-6 py-8">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-950">Results</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Review the generated ERP columns before downloading the file.
-              </p>
-            </div>
-
-            <ColumnSummaryPanel columnSummary={uploadResult.column_summary} />
-            <PreviewTable
-              columnSummary={uploadResult.column_summary}
-              preview={uploadResult.preview}
-              totalRows={uploadResult.row_count}
-            />
-            <DownloadPanel
-              downloadUrl={uploadResult.download_url}
-              errorCount={uploadResult.error_count}
-              errorReportUrl={uploadResult.error_report_url}
-              rowCount={uploadResult.row_count}
-              warningCount={uploadResult.warnings.length}
-            />
-          </div>
-        </section>
-      ) : null}
-
-      <footer className="border-t border-slate-200 bg-slate-50">
-        <div className="mx-auto max-w-6xl px-6 py-5 text-sm text-slate-600">
-          Defaulted columns (yellow) require manual entry in the ERP after import.
-        </div>
-      </footer>
-    </div>
-  );
-}
-
-interface CustomTemplateFormProps {
-  onResetResult: () => void;
-  onUploadComplete: (result: UploadResult) => void;
-}
-
-function CustomTemplateForm({
-  onResetResult,
-  onUploadComplete,
-}: CustomTemplateFormProps) {
-  const [posFile, setPosFile] = useState<File | null>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [activeResult, setActiveResult] = useState<UploadResult | null>(null);
+  const [stats, setStats] = useState<AdminStats>(DEFAULT_STATS);
+  const [recentUploads, setRecentUploads] = useState<RecentUploadItem[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [reprocessingId, setReprocessingId] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [posColumns, setPosColumns] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isApplying, setIsApplying] = useState(false);
-  const [error, setError] = useState("");
 
-  const clearMappingState = () => {
+  const loadWorkspaceData = useCallback(async () => {
+    setIsLoadingHistory(true);
+    setError("");
+
+    try {
+      const [statsResponse, uploadsResponse] = await Promise.all([
+        fetch("/api/admin/stats", { cache: "no-store" }),
+        fetch(`/api/admin/uploads?limit=${PAGE_SIZE}&offset=0`, {
+          cache: "no-store",
+        }),
+      ]);
+
+      if (!statsResponse.ok) {
+        setError(await getErrorMessage(statsResponse));
+        return;
+      }
+
+      if (!uploadsResponse.ok) {
+        setError(await getErrorMessage(uploadsResponse));
+        return;
+      }
+
+      const statsPayload = (await statsResponse.json()) as AdminStats;
+      const uploadsPayload = (await uploadsResponse.json()) as UploadsResponse;
+      setStats(statsPayload);
+      setRecentUploads(uploadsPayload.uploads ?? []);
+    } catch {
+      setError("Workspace data failed to load. Check that the backend server is running.");
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadWorkspaceData();
+  }, [loadWorkspaceData]);
+
+  const selectedFileSummary = useMemo(() => {
+    if (!file) {
+      return null;
+    }
+
+    return [
+      { label: "File", value: file.name },
+      { label: "Size", value: formatFileSize(file.size) },
+    ];
+  }, [file]);
+
+  const resetTemplateState = () => {
     setPosColumns([]);
     setSuggestions([]);
-    onResetResult();
   };
 
-  const handlePosFileSelect = (selectedFile: File) => {
+  const handleModeChange = (nextMode: UploadMode) => {
+    setMode(nextMode);
     setError("");
-    clearMappingState();
+    setNotice("");
+    resetTemplateState();
+  };
 
-    if (!isAllowedFile(selectedFile)) {
-      setPosFile(null);
+  const handleFileSelect = (selectedFile: File) => {
+    setError("");
+    setNotice("");
+    resetTemplateState();
+
+    if (!isAllowedFile(selectedFile) || selectedFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      setFile(null);
       return;
     }
 
-    if (selectedFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      setPosFile(null);
-      return;
-    }
-
-    setPosFile(selectedFile);
+    setFile(selectedFile);
   };
 
   const handleTemplateFileSelect = (selectedFile: File) => {
     setError("");
-    clearMappingState();
+    setNotice("");
+    resetTemplateState();
 
-    if (!isAllowedFile(selectedFile)) {
-      setTemplateFile(null);
-      return;
-    }
-
-    if (selectedFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+    if (!isAllowedFile(selectedFile) || selectedFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
       setTemplateFile(null);
       return;
     }
@@ -233,20 +227,79 @@ function CustomTemplateForm({
     setTemplateFile(selectedFile);
   };
 
-  const handleAnalyzeMapping = async (event: FormEvent<HTMLFormElement>) => {
+  const handleUploadComplete = async (result: UploadResult) => {
+    setActiveResult(result);
+    setRecentUploads((currentUploads) => [
+      uploadResultToRecent(
+        result,
+        file?.name ?? `Upload ${result.upload_id}`,
+        mode === "template" ? "Custom Template" : DEFAULT_SOURCE_SYSTEM,
+        todayInputValue(),
+      ),
+      ...currentUploads.filter((upload) => upload.id !== result.upload_id),
+    ].slice(0, PAGE_SIZE));
+    setStats((currentStats) => ({
+      uploads_today: currentStats.uploads_today + 1,
+      uploads_this_month: currentStats.uploads_this_month + 1,
+      errors_today: currentStats.errors_today + result.error_count,
+      total_rows_processed: currentStats.total_rows_processed + result.row_count,
+    }));
+    setNotice("Processed output is ready in Mapping Preview.");
+    await loadWorkspaceData();
+  };
+
+  const handleStandardProcess = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!posFile || !templateFile) {
+    if (!file || isProcessing) {
       return;
     }
 
     const formData = new FormData();
-    formData.append("pos_file", posFile);
+    formData.append("file", file);
+    formData.append("source_system", DEFAULT_SOURCE_SYSTEM);
+    formData.append("transaction_date", todayInputValue());
+
+    setIsProcessing(true);
+    setError("");
+    setNotice("");
+    setActiveResult(null);
+
+    try {
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        setError(await getErrorMessage(response));
+        return;
+      }
+
+      const result = (await response.json()) as UploadResult;
+      await handleUploadComplete(result);
+    } catch {
+      setError("Upload failed. Check that the backend server is running.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAnalyzeMapping = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!file || !templateFile || isAnalyzing) {
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("pos_file", file);
     formData.append("template_file", templateFile);
 
     setIsAnalyzing(true);
     setError("");
-    clearMappingState();
+    setNotice("");
+    resetTemplateState();
 
     try {
       const response = await fetch("/api/transform/with-template", {
@@ -262,6 +315,7 @@ function CustomTemplateForm({
       const result = (await response.json()) as SuggestionResult;
       setPosColumns(result.pos_columns ?? []);
       setSuggestions(result.suggestions ?? []);
+      setNotice("Mapping suggestions are ready for review.");
     } catch {
       setError("Mapping analysis failed. Check that the backend server is running.");
     } finally {
@@ -270,17 +324,18 @@ function CustomTemplateForm({
   };
 
   const handleConfirmMapping = async (mapping: MappingItem[]) => {
-    if (!posFile || isApplying) {
+    if (!file || isProcessing) {
       return;
     }
 
     const formData = new FormData();
-    formData.append("pos_file", posFile);
+    formData.append("pos_file", file);
     formData.append("confirmed_mapping", JSON.stringify(mapping));
 
-    setIsApplying(true);
+    setIsProcessing(true);
     setError("");
-    onResetResult();
+    setNotice("");
+    setActiveResult(null);
 
     try {
       const response = await fetch("/api/transform/with-template", {
@@ -294,63 +349,198 @@ function CustomTemplateForm({
       }
 
       const result = (await response.json()) as UploadResult;
-      onUploadComplete(result);
+      await handleUploadComplete(result);
     } catch {
-      setError("Template transform failed. Check that the backend server is running.");
+      setError("Template processing failed. Check that the backend server is running.");
     } finally {
-      setIsApplying(false);
+      setIsProcessing(false);
+    }
+  };
+
+  const handleReprocess = async (uploadId: number) => {
+    if (reprocessingId !== null) {
+      return;
+    }
+
+    setReprocessingId(uploadId);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/uploads/${uploadId}/reprocess`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        setError(await getErrorMessage(response));
+        return;
+      }
+
+      const result = (await response.json()) as UploadResult;
+      setActiveResult(result);
+      setNotice("Reprocessed output is ready in Mapping Preview.");
+      await loadWorkspaceData();
+    } catch {
+      setError("Reprocess failed. Check that the backend server is running.");
+    } finally {
+      setReprocessingId(null);
     }
   };
 
   return (
-    <div className="space-y-5">
-      <form className="space-y-5" onSubmit={handleAnalyzeMapping}>
-        <div className="grid gap-4 md:grid-cols-2">
-          <DropZone
-            allowedTypes={ALLOWED_TYPES}
-            maxSizeMB={MAX_FILE_SIZE_MB}
-            onFileSelect={handlePosFileSelect}
+    <AppShell title="ERP Formatter" actionHref="/settings" actionLabel="Default Settings">
+        <section
+          aria-label="Workspace stats"
+          className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          <StatCard label="Uploads Today" value={formatNumber(stats.uploads_today)} />
+          <StatCard label="This Month" value={formatNumber(stats.uploads_this_month)} />
+          <StatCard label="Errors Today" value={formatNumber(stats.errors_today)} />
+          <StatCard
+            label="Rows Processed"
+            value={formatNumber(stats.total_rows_processed)}
           />
-          <DropZone
-            allowedTypes={ALLOWED_TYPES}
-            label="Upload ERP output template"
-            maxSizeMB={MAX_FILE_SIZE_MB}
-            onFileSelect={handleTemplateFileSelect}
-          />
-        </div>
+        </section>
 
-        {error ? (
-          <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
-            {error}
-          </p>
+        {(error || notice) ? (
+          <section className="grid gap-3">
+            {error ? (
+              <Message tone="error">{error}</Message>
+            ) : null}
+            {notice ? (
+              <Message tone="success">{notice}</Message>
+            ) : null}
+          </section>
         ) : null}
 
-        <button
-          type="submit"
-          disabled={!posFile || !templateFile || isAnalyzing}
-          className="inline-flex min-h-11 items-center justify-center rounded-md bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600"
-        >
-          {isAnalyzing ? (
-            <>
-              <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              Analyzing
-            </>
-          ) : (
-            "Analyze Mapping"
-          )}
-        </button>
-      </form>
+        <section className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
+          <div className="space-y-5">
+            <form
+              id={UPLOAD_FORM_ID}
+              onSubmit={mode === "standard" ? handleStandardProcess : handleAnalyzeMapping}
+              className="rounded-lg border border-zinc-300 bg-white p-5"
+            >
+              <div
+                role="radiogroup"
+                aria-label="Upload mode"
+                className="mb-5 inline-flex rounded-lg bg-zinc-200 p-0"
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === "standard"}
+                  onClick={() => handleModeChange("standard")}
+                  className={`min-h-9 rounded-lg px-5 text-sm font-medium transition ${
+                    mode === "standard"
+                      ? "bg-white text-black shadow-sm ring-1 ring-zinc-300"
+                      : "text-zinc-700 hover:text-black"
+                  }`}
+                >
+                  Standard
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === "template"}
+                  onClick={() => handleModeChange("template")}
+                  className={`min-h-9 rounded-lg px-5 text-sm font-medium transition ${
+                    mode === "template"
+                      ? "bg-white text-black shadow-sm ring-1 ring-zinc-300"
+                      : "text-zinc-700 hover:text-black"
+                  }`}
+                >
+                  Template
+                </button>
+              </div>
 
-      {suggestions.length > 0 ? (
-        <div className="border-t border-slate-200 pt-5">
-          <MappingReviewTable
-            isConfirming={isApplying}
-            onConfirm={handleConfirmMapping}
-            posColumns={posColumns}
-            suggestions={suggestions}
+              <DropZone
+                allowedTypes={ALLOWED_TYPES}
+                maxSizeMB={MAX_FILE_SIZE_MB}
+                onFileSelect={handleFileSelect}
+              />
+
+              {mode === "template" ? (
+                <div className="mt-4">
+                  <DropZone
+                    allowedTypes={ALLOWED_TYPES}
+                    label="Upload ERP output template"
+                    maxSizeMB={MAX_FILE_SIZE_MB}
+                    onFileSelect={handleTemplateFileSelect}
+                  />
+                </div>
+              ) : null}
+            </form>
+
+            <UploadSummaryPanel
+              formId={UPLOAD_FORM_ID}
+              mode={mode}
+              summary={selectedFileSummary}
+              disabled={
+                !file ||
+                isProcessing ||
+                isAnalyzing ||
+                (mode === "template" && !templateFile)
+              }
+              label={
+                isProcessing || isAnalyzing
+                  ? mode === "template"
+                    ? "Analyzing"
+                    : "Processing"
+                  : mode === "template"
+                    ? "Analyze Mapping"
+                    : "Process"
+              }
+            />
+          </div>
+
+          <RecentUploadPanel
+            uploads={recentUploads}
+            isLoading={isLoadingHistory}
+            reprocessingId={reprocessingId}
+            onReprocess={handleReprocess}
           />
-        </div>
-      ) : null}
-    </div>
+        </section>
+
+        {suggestions.length > 0 ? (
+          <Panel>
+            <MappingReviewTable
+              isConfirming={isProcessing}
+              onConfirm={handleConfirmMapping}
+              posColumns={posColumns}
+              suggestions={suggestions}
+            />
+          </Panel>
+        ) : null}
+
+        <Panel>
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-black">Mapping Preview</h2>
+            {activeResult?.download_url ? (
+              <ActionButton
+                href={activeResult.download_url}
+                download
+              >
+                Download
+              </ActionButton>
+            ) : (
+              <ActionButton variant="muted">
+                Download
+              </ActionButton>
+            )}
+          </div>
+
+          {activeResult ? (
+            <PreviewTable
+              columnSummary={activeResult.column_summary}
+              preview={activeResult.preview}
+              totalRows={activeResult.row_count}
+            />
+          ) : (
+            <EmptyState>
+              Process a file to preview the generated XLSX output.
+            </EmptyState>
+          )}
+        </Panel>
+    </AppShell>
   );
 }

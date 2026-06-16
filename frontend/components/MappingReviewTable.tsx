@@ -109,41 +109,41 @@ export function MappingReviewTable({
       <div>
         <h2
           id="mapping-review-title"
-          className="text-lg font-semibold text-slate-950"
+          className="text-base font-semibold text-black"
         >
           Mapping Review
         </h2>
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-zinc-600">
           {suggestions.length} output columns
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+      <div className="overflow-hidden rounded-lg border border-zinc-300 bg-white">
         <div className="max-h-[520px] overflow-auto">
           <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
-            <thead className="sticky top-0 z-10 bg-slate-50">
+            <thead className="sticky top-0 z-10 bg-zinc-100">
               <tr>
                 <th
                   scope="col"
-                  className="whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700"
+                  className="whitespace-nowrap border-b border-r border-zinc-300 px-3 py-2 font-semibold text-zinc-700"
                 >
                   Output Column
                 </th>
                 <th
                   scope="col"
-                  className="whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700"
+                  className="whitespace-nowrap border-b border-r border-zinc-300 px-3 py-2 font-semibold text-zinc-700"
                 >
                   Suggested POS Column
                 </th>
                 <th
                   scope="col"
-                  className="whitespace-nowrap border-b border-r border-slate-200 px-3 py-2 font-semibold text-slate-700"
+                  className="whitespace-nowrap border-b border-r border-zinc-300 px-3 py-2 font-semibold text-zinc-700"
                 >
                   Confidence
                 </th>
                 <th
                   scope="col"
-                  className="whitespace-nowrap border-b border-slate-200 px-3 py-2 font-semibold text-slate-700"
+                  className="whitespace-nowrap border-b border-zinc-300 px-3 py-2 font-semibold text-zinc-700"
                 >
                   Transform
                 </th>
@@ -161,12 +161,12 @@ export function MappingReviewTable({
                 return (
                   <tr
                     key={suggestion.output_col}
-                    className={isLowConfidence ? "bg-amber-50" : "even:bg-slate-50"}
+                    className={isLowConfidence ? "bg-amber-50" : "even:bg-zinc-50"}
                   >
-                    <td className="whitespace-nowrap border-b border-r border-slate-100 px-3 py-2 font-medium text-slate-900">
+                    <td className="whitespace-nowrap border-b border-r border-zinc-100 px-3 py-2 font-medium text-black">
                       {suggestion.output_col}
                     </td>
-                    <td className="border-b border-r border-slate-100 px-3 py-2">
+                    <td className="border-b border-r border-zinc-100 px-3 py-2">
                       <select
                         value={draft.inputCol}
                         onChange={(event) =>
@@ -176,7 +176,7 @@ export function MappingReviewTable({
                             event.target.value,
                           )
                         }
-                        className="w-full min-w-48 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        className="w-full min-w-48 rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm text-black outline-none transition focus:border-black focus:ring-2 focus:ring-zinc-200"
                       >
                         <option value="">No source / blank</option>
                         {posColumns.map((column) => (
@@ -186,7 +186,7 @@ export function MappingReviewTable({
                         ))}
                       </select>
                     </td>
-                    <td className="border-b border-r border-slate-100 px-3 py-2">
+                    <td className="border-b border-r border-zinc-100 px-3 py-2">
                       <div className="space-y-1">
                         <span
                           className={`inline-flex min-w-16 items-center justify-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${confidenceClasses(
@@ -195,12 +195,12 @@ export function MappingReviewTable({
                         >
                           {Math.round(suggestion.confidence * 100)}%
                         </span>
-                        <p className="max-w-64 text-xs text-slate-500">
+                        <p className="max-w-64 text-xs text-zinc-500">
                           {suggestion.match_reason}
                         </p>
                       </div>
                     </td>
-                    <td className="border-b border-slate-100 px-3 py-2">
+                    <td className="border-b border-zinc-100 px-3 py-2">
                       <select
                         value={draft.transform}
                         onChange={(event) =>
@@ -210,7 +210,7 @@ export function MappingReviewTable({
                             event.target.value,
                           )
                         }
-                        className="w-full min-w-36 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        className="w-full min-w-36 rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-sm text-black outline-none transition focus:border-black focus:ring-2 focus:ring-zinc-200"
                       >
                         {TRANSFORM_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
@@ -231,7 +231,7 @@ export function MappingReviewTable({
         type="button"
         disabled={isConfirming}
         onClick={handleConfirm}
-        className="inline-flex min-h-11 items-center justify-center rounded-md bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600"
+        className="inline-flex min-h-10 items-center justify-center rounded-lg bg-black px-5 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-600"
       >
         {isConfirming ? (
           <>

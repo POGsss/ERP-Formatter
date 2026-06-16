@@ -49,6 +49,7 @@ export function DropZone({
 
   const maxBytes = maxSizeMB * 1024 * 1024;
   const acceptValue = allowedTypes.join(",");
+  const isPrimaryDropZone = label === "Drop POS file here or browse";
 
   const validateAndSelect = (file: File) => {
     setSelectedFile(file);
@@ -76,14 +77,16 @@ export function DropZone({
       : validationState === "invalid"
         ? "border-red-500 bg-red-50"
         : isDragging
-          ? "border-blue-500 bg-blue-50"
-          : "border-slate-300 bg-white";
+          ? "border-black bg-zinc-50"
+          : "border-zinc-300 bg-white";
 
   return (
     <div>
       <button
         type="button"
-        className={`flex min-h-40 w-full flex-col items-center justify-center rounded-md border-2 border-dashed px-6 py-8 text-center transition ${borderClass}`}
+        className={`flex w-full flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center transition ${
+          isPrimaryDropZone ? "min-h-72 py-10" : "min-h-32 py-6"
+        } ${borderClass}`}
         onClick={() => inputRef.current?.click()}
         onDragOver={(event) => {
           event.preventDefault();
@@ -100,15 +103,33 @@ export function DropZone({
           }
         }}
       >
-        <span className="text-base font-semibold text-slate-900">
+        <span
+          aria-hidden="true"
+          className="mb-3 flex h-10 w-10 items-center justify-center rounded-full border border-zinc-300 text-zinc-400"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-6 w-6"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.8"
+          >
+            <path d="M12 16V4" />
+            <path d="m7 9 5-5 5 5" />
+            <path d="M20 16.5v1.75A1.75 1.75 0 0 1 18.25 20H5.75A1.75 1.75 0 0 1 4 18.25V16.5" />
+          </svg>
+        </span>
+        <span className="text-sm font-semibold text-black">
           {label}
         </span>
-        <span className="mt-2 text-sm text-slate-600">
+        <span className="mt-2 text-xs font-medium text-zinc-500">
           Accepted: {allowedTypes.join(", ")} up to {maxSizeMB} MB
         </span>
 
         {selectedFile ? (
-          <span className="mt-4 rounded-md bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-200">
+          <span className="mt-4 max-w-full truncate rounded-lg bg-zinc-100 px-3 py-2 text-sm font-medium text-black ring-1 ring-zinc-200">
             {selectedFile.name} ({formatFileSize(selectedFile.size)})
           </span>
         ) : null}

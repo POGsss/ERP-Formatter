@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+pandas
+openpyxl
+xlrd
+python-dotenv
+aiofiles
+bcrypt
+python-jose[cryptography]

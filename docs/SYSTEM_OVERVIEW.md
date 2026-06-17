@@ -7,7 +7,7 @@
 
 A lightweight internal web application that automates the reformatting of raw POS export files
 into ERP-ready import files. The system reads a POS daily export, applies a fixed column mapping
-to the ERP's 18-column import template, and produces a downloadable `.xlsx` file that accounting
+to the FACT ERP.NG Sale Invoice 11-column import template, and produces a downloadable `.xlsx` file that accounting
 can import directly — no manual column remapping inside the ERP required.
 
 ---
@@ -45,29 +45,22 @@ AFTER (automated):
 
 ## Fixed ERP Output Template
 
-The system always produces a file with exactly these 18 columns in this order.
-This is the format the ERP accepts for import.
+The system always produces a file with exactly these 11 columns in this order.
+This is the FACT ERP.NG Sale Invoice import format.
 
-| # | Column | Type | Default if unmappable |
-|---|---|---|---|
-| 1 | Customer | String | `NA` |
-| 2 | Product | String/Int | `NA` |
-| 3 | Quantity | Number | `1` |
-| 4 | Price | Number | `0` |
-| 5 | Date | Date (MM/DD/YYYY) | today's date |
-| 6 | Doc Class | String | `NA` |
-| 7 | Customer Code | String/Int | `NA` |
-| 8 | Product Name | String | `NA` |
-| 9 | Account Type | String | `NA` |
-| 10 | Total Amount | Number | `0` |
-| 11 | Vat Payable | Number | `0` |
-| 12 | Bank Code | String/Int | `NA` |
-| 13 | Remarks | String | `NA` |
-| 14 | SI Number | String | `NA` |
-| 15 | Order Number | String | `NA` |
-| 16 | Class | Int | `0` |
-| 17 | Order Date | Date (MM/DD/YYYY) | `NA` |
-| 18 | Active | Int | `1` |
+| # | Column | Type | Required? | Default / Formula |
+|---|---|---|---|---|
+| 1 | SI Number | String | Required | POS `Date` formatted as `DDMMYYYY` (example: `05/01/2026` -> `05012026`) |
+| 2 | Invoice Date | Date | Required | POS `Date` |
+| 3 | Product Code | String | Required | `NA` unless set in admin defaults |
+| 4 | Quantity | Int | Required | `1` |
+| 5 | Unit Price | Number | Required | POS `Net Sales`; blank/invalid values become `0` and are reported as errors |
+| 6 | Amount | Number | Required | `VATABLE Sales + VAT Exempt Sales - Discount PWD - Discount Other` |
+| 7 | Term Amount | Number | Required | `VAT + VAT Adjustment` |
+| 8 | Customer Code | String | Required | `NA` unless set in admin defaults |
+| 9 | Doc Class | String | Required | `NA` unless set in admin defaults |
+| 10 | Currency Code | String | Required | `PHP` |
+| 11 | Remarks | String | Optional | POS `Remarks` |
 
 ---
 
@@ -80,12 +73,13 @@ and the ERP output template. All formulas are verified against real sample data.
 
 | ERP Column | Source | Formula / Value | Notes |
 |---|---|---|---|
-| **Date** | POS: `Date` | Direct copy | Reformat to `MM/DD/YYYY` if needed |
-| **Total Amount** | POS: `Gross Sales` | Direct copy, strip commas | `Gross Sales = Net Sales + VAT + Discounts + VAT Adjustment` — the full top-line daily revenue |
-| **Vat Payable** | POS: `VAT` | Direct copy, strip commas | The VAT column maps directly |
-| **Price** | POS: `Net Sales` | Direct copy, strip commas | Net revenue before VAT — best representation of unit price for a daily batch |
-| **Quantity** | Hardcoded | `1` | Each row is a daily summary batch, not individual items |
-| **Remarks** | POS: `Remarks` | Direct copy | Will be blank/NA on most days |
+| **SI Number** | POS: `Date` | Format as `DDMMYYYY` without separators | Example: `05/01/2026` -> `05012026`; no Doc Class or invoice-number prefix |
+| **Invoice Date** | POS: `Date` | Direct copy, normalized as a date string | Used as the source for SI Number generation |
+| **Unit Price** | POS: `Net Sales` | Strip commas, cast to number | Required; blank/invalid values become `0` and are reported as errors |
+| **Amount** | POS formula | `VATABLE Sales + VAT Exempt Sales - Discount PWD - Discount Other` | Net taxable/exempt amount after selected discounts |
+| **Term Amount** | POS formula | `VAT + VAT Adjustment` | VAT amount due for the sale invoice terms |
+| **Quantity** | Admin default | `1` | Each row is a daily summary batch, not individual items |
+| **Remarks** | POS: `Remarks` | Direct copy | Optional free-text remarks |
 
 ### Formula Verification (from sample data)
 
@@ -103,40 +97,43 @@ POS values from sample:
   VAT Adjustment:       121.51
 
 Verified:
-  Net Sales = VATABLE Sales + VAT Exempt Sales + Zero Rated Sales
-  22,616.73 = 21,806.72 + 810.01 + 0.00  ✓
+  SI Number = POS Date as DDMMYYYY
+  05/01/2026 -> 05012026
 
-  Gross Sales = Net Sales + VAT + Discounts + VAT Adjustment
-  27,394.97 = 22,616.73 + 2,616.90 + 156.06 + 46.42 + 1,837.35 + 121.51  ✓
+  Amount = VATABLE Sales + VAT Exempt Sales - Discount PWD - Discount Other
+  20,623.32 = 21,806.72 + 810.01 - 156.06 - 1,837.35
+
+  Term Amount = VAT + VAT Adjustment
+  2,738.41 = 2,616.90 + 121.51
 
   Therefore:
-    Total Amount → Gross Sales  (full revenue including VAT and adjustments)
-    Price        → Net Sales    (revenue before VAT)
-    Vat Payable  → VAT          (direct)
-    Quantity     → 1            (daily batch = 1 unit)
+    SI Number   -> DDMMYYYY from POS Date
+    Unit Price  -> Net Sales
+    Amount      -> calculated sales amount
+    Term Amount -> VAT + VAT Adjustment
+    Quantity    -> 1 (daily batch = 1 unit)
 ```
 
-### Unmappable Columns (require ERP lookup data — default to NA/0)
+### ERP Setup / Admin Defaults Mapping
 
-These columns exist in the ERP template but have no equivalent in the POS export.
-They require ERP-specific codes (customer IDs, product codes, etc.) that only exist
-inside the ERP itself. Once ERP access is obtained, these can be configured as
-hardcoded constants or lookup tables per source system.
+All 11 output columns are configurable in Admin Settings. Formula rows use native POS
+logic by default; changing the type to `string`, `int`, `float`, or `date` overrides
+the formula with a fixed accounting value and records "Overridden in admin settings"
+in the Column Summary sheet.
 
-| ERP Column | Default | Why unmappable now |
-|---|---|---|
-| Customer | `NA` | ERP customer name (e.g. "PAYMAYA") — not in POS export |
-| Product | `NA` | ERP internal product code (e.g. 1023) — not in POS |
-| Doc Class | `NA` | ERP document classification code (e.g. "K1") — not in POS |
-| Customer Code | `NA` | ERP numeric customer ID (e.g. 214) — not in POS |
-| Product Name | `NA` | ERP product display name — not in POS |
-| Account Type | `NA` | ERP account type label (e.g. "CARD") — not in POS |
-| Bank Code | `NA` | ERP bank/payment method code (e.g. 4) — not in POS |
-| SI Number | `NA` | ERP-generated invoice number (e.g. "K1-MYC001218") — not in POS |
-| Order Number | `NA` | NaN in sample — likely optional or ERP-generated |
-| Class | `0` | ERP enum value — not in POS |
-| Order Date | `NA` | NaN in sample — may be same as Date, confirm with ERP |
-| Active | `1` | Hardcoded default — all imported records should be active |
+| ERP Column | Default Value | Value Type | Description |
+|---|---|---|---|
+| SI Number | `(generated from date)` | formula | Auto-generated as DDMMYYYY from Invoice Date |
+| Invoice Date | `(from POS Date)` | date | Direct from POS Date column |
+| Product Code | `NA` | string | ERP internal product code - set this once |
+| Quantity | `1` | int | Daily batch = 1 unit always |
+| Unit Price | `(from POS Net Sales)` | formula | POS Net Sales column |
+| Amount | `(formula)` | formula | VATABLE Sales + VAT Exempt - Discount PWD - Discount Other |
+| Term Amount | `(formula)` | formula | VAT + VAT Adjustment |
+| Customer Code | `NA` | string | ERP customer ID - set this once |
+| Doc Class | `NA` | string | ERP document class code - set this once |
+| Currency Code | `PHP` | string | Always PHP for POS transactions |
+| Remarks | `(from POS Remarks)` | string | Direct from POS Remarks column |
 
 ---
 
@@ -150,14 +147,15 @@ hardcoded constants or lookup tables per source system.
 
 ### 2. Transformation Engine (Python core)
 - Reads the POS file regardless of metadata header depth
-- Applies the fixed 18-column ERP mapping
-- Strips commas from number fields, normalizes date format
-- Fills unmappable columns with `NA` (strings) or `0` (numbers) or `1` (Active)
-- Validates all mandatory columns are present before writing output
+- Applies the fixed 11-column FACT ERP.NG Sale Invoice mapping
+- Generates SI Number as `DDMMYYYY` from POS `Date`
+- Computes Amount and Term Amount from POS sales/VAT columns
+- Treats Unit Price as required; blanks become `0` and are reported as errors
+- Applies admin overrides for all 11 columns at runtime
 
 ### 3. Preview & Download
-- Accounting sees a preview table of all 18 output columns before downloading
-- Unmapped/defaulted columns are visually highlighted so accounting knows what needs
+- Accounting sees a preview table of all 11 output columns before downloading
+- Admin-overridden/defaulted columns are visually highlighted so accounting knows what needs
   manual attention after ERP import
 - One-click download of the formatted `.xlsx` file
 
@@ -167,7 +165,7 @@ hardcoded constants or lookup tables per source system.
 - System compares the template's column names against the POS export and
   auto-suggests mappings using fuzzy matching
 - Allows the system to handle other source systems beyond Mosaic POS in the future
-- Default mode (no template upload) always uses the fixed 18-column ERP mapping above
+- Default mode (no template upload) always uses the fixed 11-column Sale Invoice mapping above
 
 ### 5. Audit Log
 - Every upload and transformation is logged
@@ -201,20 +199,21 @@ hardcoded constants or lookup tables per source system.
         │
         ▼
 [Transformation Engine]
-  • Apply fixed 18-column ERP mapping:
-      Date        ← POS Date (reformat)
-      Total Amount← POS Gross Sales (strip commas)
-      Vat Payable ← POS VAT (strip commas)
-      Price       ← POS Net Sales (strip commas)
-      Quantity    ← hardcoded: 1
-      Remarks     ← POS Remarks
-      [12 others] ← NA or 0 (pending ERP access)
-  • Validate mandatory fields
+  • Apply fixed 11-column Sale Invoice mapping:
+      SI Number    <- POS Date formatted DDMMYYYY
+      Invoice Date <- POS Date
+      Unit Price   <- POS Net Sales
+      Amount       <- VATABLE Sales + VAT Exempt - Discount PWD - Discount Other
+      Term Amount  <- VAT + VAT Adjustment
+      Quantity     <- admin default 1
+      Product/Customer/Doc/Currency defaults <- admin settings
+      Remarks      <- POS Remarks
+  • Apply admin overrides where value_type is string/int/float/date
         │
         ├─── errors? ──→ [Error Report .xlsx]
         │
         ▼
-[Output File: 18-column ERP-ready .xlsx]
+[Output File: 11-column ERP-ready .xlsx]
         │
         ▼
 [Accounting] downloads → imports to ERP directly
@@ -231,9 +230,8 @@ hardcoded constants or lookup tables per source system.
   (until other source systems are added via the optional template mode)
 - The metadata header in the POS file is always 8 rows before the data header (row 9)
 - The ERP import is triggered manually by accounting — the system does not connect to the ERP
-- Unmappable columns output `NA` or `0` as defaults; accounting fills in ERP-specific
-  values manually inside the ERP after import, OR once ERP access is granted, these
-  can be configured as constants in the system settings
+- All 11 output columns can be reviewed and overridden in Admin Settings.
+- Formula defaults run native POS logic; fixed string/int/float/date defaults override that logic.
 - Files are temporary; outputs can be deleted after 30 days
 
 ---
@@ -242,10 +240,10 @@ hardcoded constants or lookup tables per source system.
 
 Once ERP access is obtained, the following can be added without changing the architecture:
 
-1. **Constant value configuration** — Admin sets `Customer = "PAYMAYA"`, `Doc Class = "K1"`, etc.
-   per source system in the settings panel, replacing the NA defaults
+1. **Branch/source profiles** — Admin stores different Product Code, Customer Code, Doc Class,
+   and Currency Code defaults per source system
 2. **Lookup tables** — Map POS payment method codes to ERP customer codes
-3. **SI Number generation** — Auto-generate from Doc Class prefix + sequential counter
+3. **Approval workflow** — Accounting reviews admin overrides before import
 4. **Multi-source system support** — Configure mappings for inventory, payroll, etc.
 5. **Direct ERP API integration** — If the ERP exposes an API, skip the download step entirely
 

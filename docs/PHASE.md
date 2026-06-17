@@ -301,22 +301,25 @@ Add a standalone test at the bottom (under if __name__ == "__main__":) that:
 
 ### Overview
 The core of the system. Takes the clean POS DataFrame from FileReader and produces
-a new DataFrame with exactly the 18 ERP output columns, in the correct order, with
-correct values. Applies all mapping rules defined in SYSTEM_OVERVIEW.md.
+a new DataFrame with exactly the 11 FACT ERP.NG Sale Invoice output columns, in
+the correct order, with correct values. Applies all mapping rules defined in
+SYSTEM_OVERVIEW.md.
 
 ### Requirements
-- Output must always have exactly these 18 columns in this exact order:
-  `Customer, Product, Quantity, Price, Date, Doc Class, Customer Code,
-   Product Name, Account Type, Total Amount, Vat Payable, Bank Code,
-   Remarks, SI Number, Order Number, Class, Order Date, Active`
-- Mapped columns: Date, Total Amount, Vat Payable, Price, Quantity, Remarks
-- Unmappable columns: fill with NA (strings) or 0 (numbers) or 1 (Active)
+- Output must always have exactly these 11 columns in this exact order:
+  `SI Number, Invoice Date, Product Code, Quantity, Unit Price, Amount,
+   Term Amount, Customer Code, Doc Class, Currency Code, Remarks`
+- Native POS columns/formulas: SI Number, Invoice Date, Unit Price, Amount,
+  Term Amount, Remarks
+- Admin constants: Product Code, Quantity, Customer Code, Doc Class, Currency Code
+- Unit Price is required; blank/invalid Net Sales values become `0` and are reported as errors
+- All 11 columns can be overridden by `column_defaults` at runtime
 - Return a result object with the output DataFrame plus warnings list
 
 ### User Stories
 - As the system, I want to transform any valid Mosaic POS export into the exact
-  18-column ERP format without manual intervention.
-- As accounting, I want to know which columns were defaulted so I can review them
+  11-column FACT Sale Invoice format without manual intervention.
+- As accounting, I want to know which columns were computed, mapped, or overridden so I can review them
   before importing to the ERP.
 
 ### Task
@@ -327,50 +330,49 @@ Create backend/services/transformer.py
 
 @dataclass
 class TransformResult:
-  output_df: pd.DataFrame    # always 18 columns in correct order
+  output_df: pd.DataFrame    # always 11 columns in correct order
   row_count: int
   error_count: int
-  warnings: list[str]        # e.g. ["Customer defaulted to NA — configure in settings"]
-  errors: list[str]          # e.g. ["Row 2: Gross Sales is empty — Total Amount set to 0"]
+  warnings: list[str]        # e.g. ["Product Code defaulted to NA"]
+  errors: list[str]          # fatal transform issues only
   column_summary: list[dict] # one entry per output column:
-                             # { "column": str, "source": str, "status": str }
+                             # { "column": str, "source": str, "status": str, "note"?: str }
                              # status: "mapped" | "computed" | "hardcoded" | "defaulted"
 
 --- Main class ---
 
 class DataTransformer:
   def transform(self, input_df: pd.DataFrame) -> TransformResult:
-    """Apply the fixed Mosaic POS → ERP mapping."""
+    """Apply the fixed Mosaic POS to FACT ERP.NG Sale Invoice mapping."""
 
 --- Mapping rules to implement ---
 
-MAPPED COLUMNS (read from POS, clean, write to output):
+NATIVE COLUMNS (read from POS or compute from POS):
 
-  Date:
+  SI Number:
     source: input_df["Date"]
-    transform: parse dates flexibly (try MM/DD/YYYY, YYYY-MM-DD, DD/MM/YYYY)
-               output as string "MM/DD/YYYY"
+    transform: parse Invoice Date and format as "DDMMYYYY" with no separators
+    example: "05/01/2026" -> "05012026"
     if null/error: use today's date, add warning
 
-  Total Amount:
-    source: input_df["Gross Sales"]
-    transform: strip_commas_to_float (remove commas, cast to float)
-    if null/error: default 0, add error
+  Invoice Date:
+    source: input_df["Date"]
+    transform: parse dates flexibly and output as a date string
 
-  Vat Payable:
-    source: input_df["VAT"]
-    transform: strip_commas_to_float
-    if null/error: default 0, add error
-
-  Price:
+  Unit Price:
     source: input_df["Net Sales"]
     transform: strip_commas_to_float
-    if null/error: default 0, add error
+    if null/error: default 0 and add an error because Unit Price is required
 
-  Quantity:
-    source: hardcoded value 1
-    note: each POS row is a daily batch summary = 1 unit
-    add to column_summary with status "hardcoded"
+  Amount:
+    source: POS formula
+    formula: VATABLE Sales + VAT Exempt Sales - Discount PWD - Discount Other
+    missing/blank components count as 0
+
+  Term Amount:
+    source: POS formula
+    formula: VAT + VAT Adjustment
+    missing/blank components count as 0
 
   Remarks:
     source: input_df["Remarks"]
@@ -378,20 +380,18 @@ MAPPED COLUMNS (read from POS, clean, write to output):
     if null/NaN: use empty string ""
     no warning needed (remarks is optional)
 
-DEFAULTED COLUMNS (not in POS export — fill with defaults):
+ADMIN DEFAULT COLUMNS:
 
-  Customer      → "NA"   (string)   status: "defaulted"  warn: "Customer defaulted to NA"
-  Product       → "NA"   (string)   status: "defaulted"  warn: "Product defaulted to NA"
-  Doc Class     → "NA"   (string)   status: "defaulted"  warn: "Doc Class defaulted to NA"
-  Customer Code → "NA"   (string)   status: "defaulted"  warn: "Customer Code defaulted to NA"
-  Product Name  → "NA"   (string)   status: "defaulted"  warn: "Product Name defaulted to NA"
-  Account Type  → "NA"   (string)   status: "defaulted"  warn: "Account Type defaulted to NA"
-  Bank Code     → "NA"   (string)   status: "defaulted"  warn: "Bank Code defaulted to NA"
-  SI Number     → "NA"   (string)   status: "defaulted"
-  Order Number  → "NA"   (string)   status: "defaulted"
-  Class         → 0      (int)      status: "defaulted"
-  Order Date    → "NA"   (string)   status: "defaulted"
-  Active        → 1      (int)      status: "hardcoded"  (always 1, not a warning)
+  Product Code  -> "NA"  (string) status: "defaulted"
+  Quantity      -> "1"   (int)    status: "hardcoded"
+  Customer Code -> "NA"  (string) status: "defaulted"
+  Doc Class     -> "NA"  (string) status: "defaulted"
+  Currency Code -> "PHP" (string) status: "hardcoded"
+
+Runtime override rule:
+  - If value_type == "formula", execute native computed/mapped POS logic.
+  - If value_type is "string", "int", "float", or "date", use the stored value,
+    skip native logic, and add note: "Overridden in admin settings".
 
 --- Helper functions ---
 
@@ -401,16 +401,15 @@ def strip_commas_to_float(val) -> float:
 
 def parse_date_flexible(val) -> str:
   """Try parsing val as a date in multiple formats.
-     Return formatted string "MM/DD/YYYY".
+     Return formatted string "DD/MM/YYYY".
      Returns today's date as string if parsing fails."""
 
 --- Build output DataFrame ---
 
 After processing all columns, build output_df with columns in EXACTLY this order:
-  ["Customer", "Product", "Quantity", "Price", "Date", "Doc Class",
-   "Customer Code", "Product Name", "Account Type", "Total Amount",
-   "Vat Payable", "Bank Code", "Remarks", "SI Number", "Order Number",
-   "Class", "Order Date", "Active"]
+  ["SI Number", "Invoice Date", "Product Code", "Quantity", "Unit Price",
+   "Amount", "Term Amount", "Customer Code", "Doc Class", "Currency Code",
+   "Remarks"]
 
 Deduplicate warnings (same warning appearing for multiple rows → show once with count).
 
@@ -422,25 +421,26 @@ Add a standalone test under if __name__ == "__main__": that:
 
 ### Expected Output
 Running the standalone test on `input.xlsx` produces:
-- A DataFrame with exactly 18 columns in correct order
-- `Total Amount` = 27394.97 (from Gross Sales "27,394.97")
-- `Vat Payable` = 2616.90 (from VAT "2,616.90")
-- `Price` = 22616.73 (from Net Sales "22,616.73")
+- A DataFrame with exactly 11 columns in correct order
+- `SI Number` = "05012026" from POS Date "05/01/2026"
+- `Invoice Date` = "05/01/2026"
+- `Unit Price` = 22616.73 (from Net Sales "22,616.73")
+- `Amount` = 20623.32
+- `Term Amount` = 2738.41
 - `Quantity` = 1
-- `Date` = "05/01/2026"
-- `Customer` = "NA", `Product` = "NA", etc.
-- Warnings list has 8 entries (one per defaulted column)
-- Errors list is empty (all mapped columns have valid data)
+- `Product Code`, `Customer Code`, and `Doc Class` default to "NA"
+- Blank Unit Price values add an error and appear in the error report
 
 ### Acceptance Criteria
-- [ ] Output always has exactly 18 columns in exactly the specified order
+- [ ] Output always has exactly 11 columns in exactly the specified order
 - [ ] `strip_commas_to_float("1,374,183.28")` returns `1374183.28`
 - [ ] `strip_commas_to_float(None)` returns `0.0` without raising
-- [ ] `parse_date_flexible("2026-05-01")` returns `"05/01/2026"`
+- [ ] `parse_date_flexible("2026-05-01")` returns `"01/05/2026"`
 - [ ] `parse_date_flexible("05/01/2026")` returns `"05/01/2026"` unchanged
-- [ ] All 12 defaulted columns produce correct defaults (NA or 0 or 1)
-- [ ] Warnings list is not empty (defaulted columns are reported)
-- [ ] `column_summary` has exactly 18 entries, one per output column
+- [ ] `SI Number` is generated from Invoice Date as DDMMYYYY, with no Doc Class prefix
+- [ ] Blank Unit Price adds an error and appears in the error report
+- [ ] Admin constants and formula overrides are reflected in column_summary notes
+- [ ] `column_summary` has exactly 11 entries, one per output column
 
 ---
 
@@ -991,9 +991,9 @@ Create frontend/app/admin/page.tsx:
 ## Module 5.2: Configurable Defaults Panel
 
 ### Overview
-Once ERP access is obtained, admins will need to set the constant values for the
-12 currently-defaulted columns (Customer, Product, Doc Class, etc.) without changing
-code. This module adds a settings panel for that.
+Admins need to review and override all 11 FACT ERP.NG Sale Invoice output columns,
+including computed/mapped columns, without changing code. This module adds a
+settings panel for that.
 
 ### Task
 ```
@@ -1002,45 +1002,56 @@ Add to database:
 TABLE: column_defaults
   column_name    TEXT PRIMARY KEY
   default_value  TEXT NOT NULL
-  value_type     TEXT NOT NULL    -- "string" | "int" | "float"
+  value_type     TEXT NOT NULL    -- "string" | "int" | "float" | "date" | "formula"
   description    TEXT
   updated_at     TEXT DEFAULT CURRENT_TIMESTAMP
 
-Seed with current defaults on first run:
-  Customer      → "NA"  (string)
-  Product       → "NA"  (string)
-  Doc Class     → "NA"  (string)
-  Customer Code → "NA"  (string)
-  Product Name  → "NA"  (string)
-  Account Type  → "NA"  (string)
-  Bank Code     → "NA"  (string)
-  SI Number     → "NA"  (string)
-  Order Number  → "NA"  (string)
-  Class         → "0"   (int)
-  Order Date    → "NA"  (string)
-  Active        → "1"   (int)
+Seed/upsert missing entries on startup without overwriting existing values:
+  SI Number     -> "(generated from date)"  (formula)
+  Invoice Date  -> "(from POS Date)"        (date)
+  Product Code  -> "NA"                     (string)
+  Quantity      -> "1"                      (int)
+  Unit Price    -> "(from POS Net Sales)"   (formula)
+  Amount        -> "(formula)"              (formula)
+  Term Amount   -> "(formula)"              (formula)
+  Customer Code -> "NA"                     (string)
+  Doc Class     -> "NA"                     (string)
+  Currency Code -> "PHP"                    (string)
+  Remarks       -> "(from POS Remarks)"     (string)
 
 Add to backend/routers/admin.py:
   GET  /api/admin/defaults          → list all defaults
-  PUT  /api/admin/defaults/{column} → update a default value
+  PUT  /api/admin/defaults/{column} → accept value_type and value
 
-Modify DataTransformer to load defaults from DB at transform time instead of hardcoding them.
-  (Fall back to hardcoded values if DB is unavailable.)
+Modify DataTransformer to load defaults from DB at transform time:
+  - value_type == "formula" executes native computed/mapped POS logic
+  - string/int/float/date values override native logic with the stored constant
+  - overridden columns append note: "Overridden in admin settings"
+  - fall back to hardcoded seed values if DB is unavailable
 
 Create frontend/app/admin/settings/page.tsx:
-  A table of all 12 configurable columns:
-    Column Name | Current Default | Value Type | Edit button
+  A table of all 11 configurable columns:
+    Column Name | Current Value/Formula | Value Type | Origin Description | Action buttons
   Clicking Edit opens an inline edit field with Save/Cancel.
-  On Save: PUT to /api/admin/defaults/{column}
-  Show note: "These values are used when the POS file has no data for this column.
-              Update them once you have access to the ERP."
+  Dropdown options: string, int, float, date, formula.
+  For value_type == "formula":
+    - Disable the value input field.
+    - Show note: "This column is computed from POS data. The default shown is the formula used.
+                  To override with a fixed value, change the type to string/int/float and enter the value."
+  For other value types:
+    - Enable the value input matching the selected type.
+  On Save:
+    - PUT to /api/admin/defaults/{column}
+    - Refresh the table from GET /api/admin/defaults
 ```
 
 ### Acceptance Criteria
-- [ ] Settings page shows all 12 configurable columns with current values
+- [ ] Settings page shows all 11 configurable columns with current values/formulas
 - [ ] Editing and saving a value persists to DB
-- [ ] DataTransformer uses DB defaults, not hardcoded values
+- [ ] DataTransformer uses DB defaults and formula/constant override rules
 - [ ] Fallback to hardcoded values if DB query fails
+- [ ] Formula rows disable the value field and show the explanatory note
+- [ ] Unit Price is required and blank values create errors
 
 ---
 

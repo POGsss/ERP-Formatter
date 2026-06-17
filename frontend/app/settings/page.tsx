@@ -6,17 +6,28 @@ import {
   AppShell,
   Message,
   Panel,
+  SelectInput,
   SkeletonLine,
   TableCell,
   TableFrame,
   TableHeaderCell,
+  TextInput,
 } from "../../components/ui";
 
-type DefaultValueType = "string" | "int" | "float";
+type DefaultValueType = "string" | "int" | "float" | "date" | "formula";
+
+const DEFAULT_VALUE_TYPES: DefaultValueType[] = [
+  "string",
+  "int",
+  "float",
+  "date",
+  "formula",
+];
 
 interface ColumnDefault {
   column_name: string;
   default_value: string;
+  value?: string;
   value_type: DefaultValueType;
   description: string | null;
   updated_at: string;
@@ -43,8 +54,16 @@ async function getErrorMessage(response: Response): Promise<string> {
   }
 }
 
-function inputType(valueType: DefaultValueType): "number" | "text" {
-  return valueType === "string" ? "text" : "number";
+function inputType(valueType: DefaultValueType): "number" | "text" | "date" {
+  if (valueType === "int" || valueType === "float") {
+    return "number";
+  }
+
+  if (valueType === "date") {
+    return "date";
+  }
+
+  return "text";
 }
 
 function inputStep(valueType: DefaultValueType): string | undefined {
@@ -59,10 +78,52 @@ function inputStep(valueType: DefaultValueType): string | undefined {
   return undefined;
 }
 
+function coerceDraftValueForType(value: string, valueType: DefaultValueType): string {
+  const trimmedValue = value.trim();
+
+  if (valueType === "formula") {
+    return value;
+  }
+
+  if (valueType === "int") {
+    const parsedValue = Number.parseInt(trimmedValue, 10);
+    return Number.isNaN(parsedValue) ? "0" : String(parsedValue);
+  }
+
+  if (valueType === "float") {
+    const parsedValue = Number.parseFloat(trimmedValue);
+    return Number.isNaN(parsedValue) ? "0" : String(parsedValue);
+  }
+
+  return value;
+}
+
+function inputValue(value: string, valueType: DefaultValueType): string {
+  if (valueType === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return "";
+  }
+
+  return value;
+}
+
+function currentValue(item: ColumnDefault): string {
+  return item.value ?? item.default_value;
+}
+
+function displayCurrentValue(item: ColumnDefault): string {
+  if (item.value_type === "formula") {
+    return "System calculated";
+  }
+
+  return currentValue(item);
+}
+
 export default function DefaultSettingsPage() {
   const [defaults, setDefaults] = useState<ColumnDefault[]>([]);
   const [editingColumn, setEditingColumn] = useState<string | null>(null);
   const [draftValue, setDraftValue] = useState("");
+  const [draftValueType, setDraftValueType] =
+    useState<DefaultValueType>("string");
   const [isLoading, setIsLoading] = useState(true);
   const [savingColumn, setSavingColumn] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -97,7 +158,8 @@ export default function DefaultSettingsPage() {
 
   const startEdit = (item: ColumnDefault) => {
     setEditingColumn(item.column_name);
-    setDraftValue(item.default_value);
+    setDraftValue(currentValue(item));
+    setDraftValueType(item.value_type);
     setError("");
     setNotice("");
   };
@@ -105,6 +167,7 @@ export default function DefaultSettingsPage() {
   const cancelEdit = () => {
     setEditingColumn(null);
     setDraftValue("");
+    setDraftValueType("string");
   };
 
   const saveDefault = async (item: ColumnDefault) => {
@@ -124,7 +187,10 @@ export default function DefaultSettingsPage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ default_value: draftValue }),
+          body: JSON.stringify({
+            value: draftValue,
+            value_type: draftValueType,
+          }),
         },
       );
 
@@ -134,14 +200,12 @@ export default function DefaultSettingsPage() {
       }
 
       const payload = (await response.json()) as DefaultUpdateResponse;
-      setDefaults((currentDefaults) =>
-        currentDefaults.map((current) =>
-          current.column_name === item.column_name ? payload.default : current,
-        ),
-      );
+      void payload;
       setEditingColumn(null);
       setDraftValue("");
+      setDraftValueType("string");
       setNotice(`${item.column_name} default saved.`);
+      await loadDefaults();
     } catch {
       setError("Default save failed. Check that the backend server is running.");
     } finally {
@@ -165,7 +229,7 @@ export default function DefaultSettingsPage() {
               ERP Default Values
             </h2>
             <p className="mt-1 text-sm text-zinc-600">
-              Values used when an uploaded file does not include an ERP column.
+              Configure all Sale Invoice output columns, including computed formulas.
             </p>
           </div>
           <ActionButton
@@ -182,14 +246,15 @@ export default function DefaultSettingsPage() {
             <thead className="sticky top-0 z-10">
               <tr>
                 <TableHeaderCell>Column Name</TableHeaderCell>
-                <TableHeaderCell>Current Default</TableHeaderCell>
+                <TableHeaderCell>Current Value</TableHeaderCell>
                 <TableHeaderCell>Value Type</TableHeaderCell>
-                <TableHeaderCell>Action</TableHeaderCell>
+                <TableHeaderCell>Origin Description</TableHeaderCell>
+                <TableHeaderCell className="text-center">Action</TableHeaderCell>
               </tr>
             </thead>
             <tbody className="bg-white">
               {isLoading ? (
-                Array.from({ length: 8 }).map((_, index) => (
+                Array.from({ length: 11 }).map((_, index) => (
                   <tr key={index}>
                     <TableCell>
                       <SkeletonLine className="h-4 w-40" />
@@ -201,6 +266,9 @@ export default function DefaultSettingsPage() {
                       <SkeletonLine className="h-4 w-20" />
                     </TableCell>
                     <TableCell>
+                      <SkeletonLine className="h-4 w-56" />
+                    </TableCell>
+                    <TableCell>
                       <div className="h-9 w-16 rounded-lg border border-zinc-200 bg-white" />
                     </TableCell>
                   </tr>
@@ -208,7 +276,7 @@ export default function DefaultSettingsPage() {
               ) : defaults.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="px-4 py-10 text-center text-sm font-medium text-zinc-500"
                   >
                     No configurable defaults found.
@@ -220,33 +288,65 @@ export default function DefaultSettingsPage() {
                   const isSaving = savingColumn === item.column_name;
 
                   return (
-                    <tr key={item.column_name} className="bg-white hover:bg-zinc-50">
+                    <tr
+                      key={item.column_name}
+                      className="h-[60px] bg-white align-middle hover:bg-zinc-50"
+                    >
                       <TableCell className="whitespace-nowrap font-semibold text-black">
                         {item.column_name}
                       </TableCell>
                       <TableCell className="min-w-56">
                         {isEditing ? (
-                          <input
-                            type={inputType(item.value_type)}
-                            step={inputStep(item.value_type)}
-                            value={draftValue}
-                            onChange={(event) =>
-                              setDraftValue(event.target.value)
-                            }
-                            className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-black outline-none transition focus:border-black focus:ring-2 focus:ring-zinc-200"
-                          />
+                          <div className="grid gap-2">
+                            <TextInput
+                              type={inputType(draftValueType)}
+                              step={inputStep(draftValueType)}
+                              value={
+                                draftValueType === "formula"
+                                  ? ""
+                                  : inputValue(draftValue, draftValueType)
+                              }
+                              disabled={draftValueType === "formula"}
+                              onChange={(event) =>
+                                setDraftValue(event.target.value)
+                              }
+                              className="w-full"
+                            />
+                          </div>
                         ) : (
-                          item.default_value
+                          displayCurrentValue(item)
                         )}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
-                        <span className="inline-flex rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold text-black">
-                          {item.value_type}
-                        </span>
-                      </TableCell>
-                      <TableCell className="min-w-44">
                         {isEditing ? (
-                          <div className="flex flex-wrap gap-2">
+                          <SelectInput
+                            value={draftValueType}
+                            onChange={(event) => {
+                              const nextValueType = event.target.value as DefaultValueType;
+                              setDraftValueType(nextValueType);
+                              setDraftValue((currentValue) =>
+                                coerceDraftValueForType(currentValue, nextValueType),
+                              );
+                            }}
+                          >
+                            {DEFAULT_VALUE_TYPES.map((valueType) => (
+                              <option key={valueType} value={valueType}>
+                                {valueType}
+                              </option>
+                            ))}
+                          </SelectInput>
+                        ) : (
+                          <span className="inline-flex rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-semibold text-black">
+                            {item.value_type}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="min-w-72 text-zinc-600">
+                        {item.description || "No description available."}
+                      </TableCell>
+                      <TableCell className="min-w-44 text-center">
+                        {isEditing ? (
+                          <div className="flex flex-nowrap justify-center gap-2">
                             <ActionButton
                               onClick={() => void saveDefault(item)}
                               disabled={savingColumn !== null}

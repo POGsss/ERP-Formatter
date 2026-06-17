@@ -1,6 +1,13 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { DropZone } from "../components/DropZone";
 import { MappingReviewTable } from "../components/MappingReviewTable";
 import { PreviewTable } from "../components/PreviewTable";
@@ -130,16 +137,20 @@ export default function HomePage() {
   const [file, setFile] = useState<File | null>(null);
   const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [activeResult, setActiveResult] = useState<UploadResult | null>(null);
+  const [selectedUpload, setSelectedUpload] = useState<RecentUploadItem | null>(null);
+  const uploadColumnRef = useRef<HTMLDivElement | null>(null);
   const [stats, setStats] = useState<AdminStats>(DEFAULT_STATS);
   const [recentUploads, setRecentUploads] = useState<RecentUploadItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [reprocessingId, setReprocessingId] = useState<number | null>(null);
+  const [dropZoneResetKey, setDropZoneResetKey] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [posColumns, setPosColumns] = useState<string[]>([]);
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [uploadColumnHeight, setUploadColumnHeight] = useState<number | null>(null);
 
   const loadWorkspaceData = useCallback(async () => {
     setIsLoadingHistory(true);
@@ -178,16 +189,46 @@ export default function HomePage() {
     void loadWorkspaceData();
   }, [loadWorkspaceData]);
 
-  const selectedFileSummary = useMemo(() => {
-    if (!file) {
-      return null;
+  const selectedItemSummary = useMemo(() => {
+    if (selectedUpload) {
+      return [
+        { label: "File", value: selectedUpload.original_name },
+        { label: "Source", value: selectedUpload.source_system || "Unknown" },
+        { label: "Rows", value: formatNumber(selectedUpload.row_count) },
+      ];
     }
 
-    return [
-      { label: "File", value: file.name },
-      { label: "Size", value: formatFileSize(file.size) },
-    ];
-  }, [file]);
+    if (file) {
+      return [
+        { label: "File", value: file.name },
+        { label: "Size", value: formatFileSize(file.size) },
+      ];
+    }
+
+    return null;
+  }, [file, selectedUpload]);
+
+  useEffect(() => {
+    const uploadColumn = uploadColumnRef.current;
+    if (!uploadColumn) {
+      return;
+    }
+
+    const updateUploadColumnHeight = () => {
+      setUploadColumnHeight(uploadColumn.offsetHeight);
+    };
+
+    updateUploadColumnHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateUploadColumnHeight);
+      return () => window.removeEventListener("resize", updateUploadColumnHeight);
+    }
+
+    const observer = new ResizeObserver(updateUploadColumnHeight);
+    observer.observe(uploadColumn);
+    return () => observer.disconnect();
+  }, [mode, selectedItemSummary]);
 
   const resetTemplateState = () => {
     setPosColumns([]);
@@ -196,6 +237,7 @@ export default function HomePage() {
 
   const handleModeChange = (nextMode: UploadMode) => {
     setMode(nextMode);
+    setSelectedUpload(null);
     setError("");
     setNotice("");
     resetTemplateState();
@@ -205,6 +247,7 @@ export default function HomePage() {
     setError("");
     setNotice("");
     resetTemplateState();
+    setSelectedUpload(null);
 
     if (!isAllowedFile(selectedFile) || selectedFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
       setFile(null);
@@ -218,6 +261,7 @@ export default function HomePage() {
     setError("");
     setNotice("");
     resetTemplateState();
+    setSelectedUpload(null);
 
     if (!isAllowedFile(selectedFile) || selectedFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
       setTemplateFile(null);
@@ -229,6 +273,7 @@ export default function HomePage() {
 
   const handleUploadComplete = async (result: UploadResult) => {
     setActiveResult(result);
+    setSelectedUpload(null);
     setRecentUploads((currentUploads) => [
       uploadResultToRecent(
         result,
@@ -244,14 +289,23 @@ export default function HomePage() {
       errors_today: currentStats.errors_today + result.error_count,
       total_rows_processed: currentStats.total_rows_processed + result.row_count,
     }));
-    setNotice("Processed output is ready in Mapping Preview.");
+    setNotice("Processed output is ready in Output Preview.");
     await loadWorkspaceData();
   };
 
   const handleStandardProcess = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!file || isProcessing) {
+    if (isProcessing) {
+      return;
+    }
+
+    if (selectedUpload) {
+      await handleSelectedUploadProcess(selectedUpload.id);
+      return;
+    }
+
+    if (!file) {
       return;
     }
 
@@ -357,14 +411,26 @@ export default function HomePage() {
     }
   };
 
-  const handleReprocess = async (uploadId: number) => {
+  const handleSelectRecentUpload = (upload: RecentUploadItem) => {
+    setSelectedUpload(upload);
+    setFile(null);
+    setTemplateFile(null);
+    setDropZoneResetKey((currentKey) => currentKey + 1);
+    setError("");
+    setNotice("");
+    resetTemplateState();
+  };
+
+  const handleSelectedUploadProcess = async (uploadId: number) => {
     if (reprocessingId !== null) {
       return;
     }
 
+    setIsProcessing(true);
     setReprocessingId(uploadId);
     setError("");
     setNotice("");
+    setActiveResult(null);
 
     try {
       const response = await fetch(`/api/admin/uploads/${uploadId}/reprocess`, {
@@ -378,14 +444,42 @@ export default function HomePage() {
 
       const result = (await response.json()) as UploadResult;
       setActiveResult(result);
-      setNotice("Reprocessed output is ready in Mapping Preview.");
+      setSelectedUpload((currentUpload) =>
+        currentUpload?.id === uploadId
+          ? {
+              ...currentUpload,
+              status: result.status,
+              row_count: result.row_count,
+              error_count: result.error_count,
+              download_url: result.download_url,
+              error_report_url: result.error_report_url,
+            }
+          : currentUpload,
+      );
+      setNotice("Processed output is ready in Output Preview.");
       await loadWorkspaceData();
     } catch {
-      setError("Reprocess failed. Check that the backend server is running.");
+      setError("Process failed. Check that the backend server is running.");
     } finally {
       setReprocessingId(null);
+      setIsProcessing(false);
     }
   };
+
+  const isProcessDisabled =
+    isProcessing ||
+    isAnalyzing ||
+    (mode === "standard"
+      ? !file && !selectedUpload
+      : !file || !templateFile);
+  const summaryTitle = selectedUpload ? "Selected item" : "Ready to process";
+  const summaryBadge = selectedUpload
+    ? "Recent"
+    : mode === "template"
+      ? "Template"
+      : "Standard";
+  const previewRowCount = activeResult?.preview.length ?? 0;
+  const previewTotalRows = activeResult?.row_count ?? 0;
 
   return (
     <AppShell title="ERP Formatter" actionHref="/settings" actionLabel="Default Settings">
@@ -413,8 +507,8 @@ export default function HomePage() {
           </section>
         ) : null}
 
-        <section className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
-          <div className="space-y-5">
+        <section className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)] lg:items-start">
+          <div ref={uploadColumnRef} className="space-y-5 self-start">
             <form
               id={UPLOAD_FORM_ID}
               onSubmit={mode === "standard" ? handleStandardProcess : handleAnalyzeMapping}
@@ -453,34 +547,49 @@ export default function HomePage() {
                 </button>
               </div>
 
-              <DropZone
-                allowedTypes={ALLOWED_TYPES}
-                maxSizeMB={MAX_FILE_SIZE_MB}
-                onFileSelect={handleFileSelect}
-              />
-
-              {mode === "template" ? (
-                <div className="mt-4">
+              <div className="h-72">
+                {mode === "template" ? (
+                  <div className="grid h-full grid-rows-2 gap-3">
+                    <DropZone
+                      key={`pos-template-${dropZoneResetKey}`}
+                      allowedTypes={ALLOWED_TYPES}
+                      buttonClassName="h-full px-4"
+                      className="h-full min-h-0"
+                      compact
+                      label="Upload POS file"
+                      maxSizeMB={MAX_FILE_SIZE_MB}
+                      onFileSelect={handleFileSelect}
+                    />
+                    <DropZone
+                      key={`template-${dropZoneResetKey}`}
+                      allowedTypes={ALLOWED_TYPES}
+                      buttonClassName="h-full px-4"
+                      className="h-full min-h-0"
+                      compact
+                      label="Upload ERP output template"
+                      maxSizeMB={MAX_FILE_SIZE_MB}
+                      onFileSelect={handleTemplateFileSelect}
+                    />
+                  </div>
+                ) : (
                   <DropZone
+                    key={`pos-standard-${dropZoneResetKey}`}
                     allowedTypes={ALLOWED_TYPES}
-                    label="Upload ERP output template"
+                    buttonClassName="h-full"
+                    className="h-full"
                     maxSizeMB={MAX_FILE_SIZE_MB}
-                    onFileSelect={handleTemplateFileSelect}
+                    onFileSelect={handleFileSelect}
                   />
-                </div>
-              ) : null}
+                )}
+              </div>
             </form>
 
             <UploadSummaryPanel
+              badgeLabel={summaryBadge}
               formId={UPLOAD_FORM_ID}
-              mode={mode}
-              summary={selectedFileSummary}
-              disabled={
-                !file ||
-                isProcessing ||
-                isAnalyzing ||
-                (mode === "template" && !templateFile)
-              }
+              summary={selectedItemSummary}
+              summaryTitle={summaryTitle}
+              disabled={isProcessDisabled}
               label={
                 isProcessing || isAnalyzing
                   ? mode === "template"
@@ -496,8 +605,11 @@ export default function HomePage() {
           <RecentUploadPanel
             uploads={recentUploads}
             isLoading={isLoadingHistory}
-            reprocessingId={reprocessingId}
-            onReprocess={handleReprocess}
+            isActionDisabled={isProcessing || isAnalyzing}
+            height={uploadColumnHeight}
+            processingUploadId={reprocessingId}
+            selectedUploadId={selectedUpload?.id ?? null}
+            onSelect={handleSelectRecentUpload}
           />
         </section>
 
@@ -513,8 +625,13 @@ export default function HomePage() {
         ) : null}
 
         <Panel>
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-black">Mapping Preview</h2>
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-black">Output Preview</h2>
+              <p className="mt-1 text-sm text-zinc-600">
+                Showing {previewRowCount} of {previewTotalRows} rows
+              </p>
+            </div>
             {activeResult?.download_url ? (
               <ActionButton
                 href={activeResult.download_url}
@@ -533,7 +650,6 @@ export default function HomePage() {
             <PreviewTable
               columnSummary={activeResult.column_summary}
               preview={activeResult.preview}
-              totalRows={activeResult.row_count}
             />
           ) : (
             <EmptyState>

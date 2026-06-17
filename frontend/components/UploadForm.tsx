@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { DropZone } from "./DropZone";
 import type { UploadResult } from "../types";
+import { ActionButton, Message } from "./ui";
 
 interface UploadFormProps {
   onUploadComplete: (result: UploadResult) => void;
@@ -114,25 +115,15 @@ export function UploadForm({ onUploadComplete }: UploadFormProps) {
       />
 
       {error ? (
-        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
-          {error}
-        </p>
+        <Message tone="error">{error}</Message>
       ) : null}
 
-      <button
+      <ActionButton
         type="submit"
         disabled={!file || isUploading}
-        className="inline-flex min-h-11 items-center justify-center rounded-md bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600"
       >
-        {isUploading ? (
-          <>
-            <span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            Processing
-          </>
-        ) : (
-          "Upload and Format"
-        )}
-      </button>
+        {isUploading ? "Processing" : "Upload and Format"}
+      </ActionButton>
     </form>
   );
 }

@@ -4,7 +4,6 @@ import { TableFrame, TableHeaderCell } from "./ui";
 interface PreviewTableProps {
   preview: Record<string, any>[];
   columnSummary: ColumnSummaryItem[];
-  totalRows?: number;
 }
 
 function displayValue(value: unknown): string {
@@ -26,47 +25,36 @@ function isDefaultedValue(value: unknown): boolean {
 export function PreviewTable({
   preview,
   columnSummary,
-  totalRows,
 }: PreviewTableProps) {
   const summaryByColumn = new Map(
-    columnSummary.map((item) => [item.column, item.status]),
+    columnSummary.map((item) => [item.column, item]),
   );
   const previewColumns = preview.length > 0 ? Object.keys(preview[0]) : [];
   const columns = [
     ...columnSummary.map((item) => item.column),
     ...previewColumns.filter((column) => !summaryByColumn.has(column)),
   ];
-  const shownRows = preview.length;
-  const rowTotal = totalRows ?? shownRows;
 
   return (
-    <section aria-labelledby="preview-title" className="space-y-3">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h2
-            id="preview-title"
-            className="text-base font-semibold text-black"
-          >
-            Output Preview
-          </h2>
-          <p className="text-sm text-zinc-600">
-            Showing {shownRows} of {rowTotal} rows
-          </p>
-        </div>
-      </div>
-
+    <section aria-label="Output preview table">
       <TableFrame>
           <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
             <thead className="sticky top-0 z-10">
               <tr>
                 {columns.map((column) => {
-                  const status = summaryByColumn.get(column);
+                  const summary = summaryByColumn.get(column);
+                  const status = summary?.status;
                   const isDefaulted = status === "defaulted";
+                  const title = summary
+                    ? [summary.source, summary.note].filter(Boolean).join(" - ")
+                    : column;
 
                   return (
-                    <TableHeaderCell key={column}>
-                      <span className={isDefaulted ? "text-zinc-300" : ""}>
-                        {column}
+                    <TableHeaderCell key={column} title={title}>
+                      <span className="flex items-center gap-2">
+                        <span className={isDefaulted ? "text-zinc-300" : ""}>
+                          {column}
+                        </span>
                       </span>
                     </TableHeaderCell>
                   );
@@ -89,8 +77,8 @@ export function PreviewTable({
                   <tr key={rowIndex} className="bg-white hover:bg-zinc-50">
                     {columns.map((column) => {
                       const value = row[column];
-                      const isDefaultedColumn =
-                        summaryByColumn.get(column) === "defaulted";
+                      const summary = summaryByColumn.get(column);
+                      const isDefaultedColumn = summary?.status === "defaulted";
                       const highlightCell =
                         isDefaultedColumn && isDefaultedValue(value);
 
@@ -98,8 +86,9 @@ export function PreviewTable({
                         <td
                           key={`${rowIndex}-${column}`}
                           className={`whitespace-nowrap border-b border-r border-zinc-100 px-3 py-2 text-zinc-800 last:border-r-0 ${
-                            highlightCell ? "font-semibold text-black" : ""
+                            highlightCell ? "bg-zinc-50 font-semibold text-black" : ""
                           }`}
+                          title={summary?.note || summary?.source || column}
                         >
                           {displayValue(value)}
                         </td>

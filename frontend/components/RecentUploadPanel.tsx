@@ -11,13 +11,18 @@ export interface RecentUploadItem {
   error_count: number;
   download_url: string | null;
   error_report_url?: string | null;
+  filename?: string;
+  output_file?: string | null;
 }
 
 interface RecentUploadPanelProps {
+  height: number | null;
   uploads: RecentUploadItem[];
   isLoading: boolean;
-  reprocessingId: number | null;
-  onReprocess: (uploadId: number) => void;
+  isActionDisabled: boolean;
+  processingUploadId: number | null;
+  selectedUploadId: number | null;
+  onSelect: (upload: RecentUploadItem) => void;
 }
 
 function formatNumber(value: number): string {
@@ -41,88 +46,85 @@ function formatDateTime(value: string): string {
 }
 
 export function RecentUploadPanel({
+  height,
   uploads,
   isLoading,
-  reprocessingId,
-  onReprocess,
+  isActionDisabled,
+  processingUploadId,
+  selectedUploadId,
+  onSelect,
 }: RecentUploadPanelProps) {
   return (
-    <section className="min-h-[500px] rounded-lg border border-zinc-300 bg-white p-5">
+    <section
+      className="flex min-h-0 flex-col rounded-lg border border-zinc-300 bg-white p-5"
+      style={height ? { height } : undefined}
+    >
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-base font-semibold text-zinc-700">Recent Upload</h2>
       </div>
 
-      <div className="space-y-3">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
         {isLoading ? (
           Array.from({ length: 6 }).map((_, index) => (
             <div key={index} className="h-[70px] rounded-lg bg-zinc-200" />
           ))
         ) : uploads.length === 0 ? (
-          <div className="flex min-h-[420px] items-center justify-center rounded-lg border border-dashed border-zinc-200 bg-white text-sm font-medium text-zinc-500">
+          <div className="flex h-full min-h-[420px] items-center justify-center rounded-lg border border-dashed border-zinc-200 bg-white text-sm font-medium text-zinc-500">
             No processed files yet.
           </div>
         ) : (
-          uploads.map((upload) => (
-            <article
-              key={upload.id}
-              className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="truncate text-sm font-semibold text-black">
-                    {upload.original_name}
-                  </h3>
-                  <StatusBadge status={upload.status} />
+          uploads.map((upload) => {
+            const isSelected = selectedUploadId === upload.id;
+            const isProcessing = processingUploadId === upload.id;
+
+            return (
+              <article
+                key={upload.id}
+                className={`grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center ${
+                  isSelected ? "ring-1 ring-inset ring-black" : ""
+                }`}
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="truncate text-sm font-semibold text-black">
+                      {upload.original_name}
+                    </h3>
+                  </div>
+                  <p className="mt-1 text-xs font-medium text-zinc-600">
+                    {formatDateTime(upload.uploaded_at)} - {upload.source_system || "Unknown"}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-600">
+                    {formatNumber(upload.row_count)} rows - {formatNumber(upload.error_count)} errors
+                  </p>
                 </div>
-                <p className="mt-1 text-xs font-medium text-zinc-600">
-                  {formatDateTime(upload.uploaded_at)} - {upload.source_system || "Unknown"}
-                </p>
-                <p className="mt-1 text-xs text-zinc-600">
-                  {formatNumber(upload.row_count)} rows - {formatNumber(upload.error_count)} errors
-                </p>
-              </div>
-              <div className="flex flex-wrap justify-start gap-2 md:justify-end">
-                {upload.download_url ? (
+                <div className="flex flex-wrap justify-start gap-2 md:justify-end">
+                  {upload.download_url ? (
+                    <ActionButton
+                      href={upload.download_url}
+                      download
+                      className="min-h-9 px-3 py-1.5 text-xs"
+                    >
+                      Download
+                    </ActionButton>
+                  ) : (
+                    <span className="inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-500">
+                      No output
+                    </span>
+                  )}
                   <ActionButton
-                    href={upload.download_url}
-                    download
+                    variant="secondary"
+                    onClick={() => onSelect(upload)}
+                    disabled={isActionDisabled || isSelected}
                     className="min-h-9 px-3 py-1.5 text-xs"
                   >
-                    Download
+                    {isProcessing ? "Processing" : isSelected ? "Selected" : "Select"}
                   </ActionButton>
-                ) : (
-                  <span className="inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-500">
-                    No output
-                  </span>
-                )}
-                <ActionButton
-                  variant="secondary"
-                  onClick={() => onReprocess(upload.id)}
-                  disabled={reprocessingId !== null}
-                  className="min-h-9 px-3 py-1.5 text-xs"
-                >
-                  {reprocessingId === upload.id ? "Processing" : "Reprocess"}
-                </ActionButton>
-              </div>
-            </article>
-          ))
+                </div>
+              </article>
+            );
+          })
         )}
       </div>
     </section>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const classes =
-    status === "done"
-      ? "bg-emerald-100 text-emerald-700"
-      : status === "error"
-        ? "bg-red-100 text-red-700"
-        : "bg-amber-100 text-amber-700";
-
-  return (
-    <span className={`rounded-md px-2 py-1 text-xs font-semibold ${classes}`}>
-      {status || "unknown"}
-    </span>
   );
 }

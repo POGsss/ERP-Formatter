@@ -31,78 +31,77 @@ AUDIT_COLUMNS = {
 
 SEEDED_COLUMN_DEFAULTS = [
     {
-        "column_name": "Customer",
-        "default_value": "NA",
-        "value_type": "string",
-        "description": "Default customer value used when POS has no customer data.",
+        "column_name": "SI Number",
+        "default_value": "(generated from date)",
+        "value_type": "formula",
+        "description": "Auto-generated as DDMMYYYY from Invoice Date.",
     },
     {
-        "column_name": "Product",
-        "default_value": "NA",
-        "value_type": "string",
-        "description": "Default product value used when POS has no product data.",
+        "column_name": "Invoice Date",
+        "default_value": "(from POS Date)",
+        "value_type": "date",
+        "description": "Direct from POS Date column.",
     },
     {
-        "column_name": "Doc Class",
+        "column_name": "Product Code",
         "default_value": "NA",
         "value_type": "string",
-        "description": "Default ERP document class.",
+        "description": "ERP internal product code - set this once.",
+    },
+    {
+        "column_name": "Quantity",
+        "default_value": "1",
+        "value_type": "int",
+        "description": "Daily batch = 1 unit always.",
+    },
+    {
+        "column_name": "Unit Price",
+        "default_value": "(formula)",
+        "value_type": "formula",
+        "description": "Net Sales - VAT - VAT Adjustment / Quantity.",
+    },
+    {
+        "column_name": "Amount",
+        "default_value": "(formula)",
+        "value_type": "formula",
+        "description": "Net Sales - VAT - VAT Adjustment.",
+    },
+    {
+        "column_name": "Term Amount",
+        "default_value": "(formula)",
+        "value_type": "formula",
+        "description": "VAT + VAT Adjustment.",
     },
     {
         "column_name": "Customer Code",
         "default_value": "NA",
         "value_type": "string",
-        "description": "Default ERP customer code.",
+        "description": "ERP customer ID - set this once.",
     },
     {
-        "column_name": "Product Name",
+        "column_name": "Doc Class",
         "default_value": "NA",
         "value_type": "string",
-        "description": "Default ERP product name.",
+        "description": "ERP document class code - set this once.",
     },
     {
-        "column_name": "Account Type",
-        "default_value": "NA",
+        "column_name": "Currency Code",
+        "default_value": "PHP",
         "value_type": "string",
-        "description": "Default ERP account type.",
+        "description": "Always PHP for POS transactions.",
     },
     {
-        "column_name": "Bank Code",
-        "default_value": "NA",
+        "column_name": "Remarks",
+        "default_value": "(from POS Remarks)",
         "value_type": "string",
-        "description": "Default ERP bank code.",
-    },
-    {
-        "column_name": "SI Number",
-        "default_value": "NA",
-        "value_type": "string",
-        "description": "Default ERP sales invoice number.",
-    },
-    {
-        "column_name": "Order Number",
-        "default_value": "NA",
-        "value_type": "string",
-        "description": "Default ERP order number.",
-    },
-    {
-        "column_name": "Class",
-        "default_value": "0",
-        "value_type": "int",
-        "description": "Default ERP class value.",
-    },
-    {
-        "column_name": "Order Date",
-        "default_value": "NA",
-        "value_type": "string",
-        "description": "Default ERP order date value.",
-    },
-    {
-        "column_name": "Active",
-        "default_value": "1",
-        "value_type": "int",
-        "description": "Default active flag for ERP imports.",
+        "description": "Direct from POS Remarks column.",
     },
 ]
+
+SEEDED_COLUMN_NAMES = [item["column_name"] for item in SEEDED_COLUMN_DEFAULTS]
+SEEDED_COLUMN_BY_NAME = {
+    item["column_name"]: item for item in SEEDED_COLUMN_DEFAULTS
+}
 
 
 def get_db() -> sqlite3.Connection:
@@ -246,30 +245,32 @@ def count_uploads(conn: sqlite3.Connection) -> int:
 
 
 def get_column_defaults(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    placeholders = ", ".join("?" for _ in SEEDED_COLUMN_NAMES)
     rows = conn.execute(
-        """
+        f"""
         SELECT column_name, default_value, value_type, description, updated_at
         FROM column_defaults
+        WHERE column_name IN ({placeholders})
         ORDER BY
             CASE column_name
-                WHEN 'Customer' THEN 1
-                WHEN 'Product' THEN 2
-                WHEN 'Doc Class' THEN 3
-                WHEN 'Customer Code' THEN 4
-                WHEN 'Product Name' THEN 5
-                WHEN 'Account Type' THEN 6
-                WHEN 'Bank Code' THEN 7
-                WHEN 'SI Number' THEN 8
-                WHEN 'Order Number' THEN 9
-                WHEN 'Class' THEN 10
-                WHEN 'Order Date' THEN 11
-                WHEN 'Active' THEN 12
+                WHEN 'SI Number' THEN 1
+                WHEN 'Invoice Date' THEN 2
+                WHEN 'Product Code' THEN 3
+                WHEN 'Quantity' THEN 4
+                WHEN 'Unit Price' THEN 5
+                WHEN 'Amount' THEN 6
+                WHEN 'Term Amount' THEN 7
+                WHEN 'Customer Code' THEN 8
+                WHEN 'Doc Class' THEN 9
+                WHEN 'Currency Code' THEN 10
+                WHEN 'Remarks' THEN 11
                 ELSE 99
             END,
             column_name
-        """
+        """,
+        SEEDED_COLUMN_NAMES,
     ).fetchall()
-    return [dict(row) for row in rows]
+    return [_with_seed_description(dict(row)) for row in rows]
 
 
 def get_column_default(
@@ -284,22 +285,29 @@ def get_column_default(
         """,
         (column_name,),
     ).fetchone()
-    return _row_to_dict(row)
+    row_dict = _row_to_dict(row)
+    if row_dict is None:
+        return None
+    if row_dict["column_name"] not in SEEDED_COLUMN_BY_NAME:
+        return None
+    return _with_seed_description(row_dict)
 
 
 def update_column_default(
     conn: sqlite3.Connection,
     column_name: str,
     default_value: str,
+    value_type: str,
 ) -> dict[str, Any] | None:
     conn.execute(
         """
         UPDATE column_defaults
         SET default_value = ?,
+            value_type = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE column_name = ?
         """,
-        (default_value, column_name),
+        (default_value, value_type, column_name),
     )
     conn.commit()
     return get_column_default(conn, column_name)
@@ -325,6 +333,16 @@ def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return dict(row)
 
 
+def _with_seed_description(row: dict[str, Any]) -> dict[str, Any]:
+    seed = SEEDED_COLUMN_BY_NAME.get(str(row.get("column_name") or ""))
+    if seed is None:
+        return row
+
+    row["description"] = seed["description"]
+    row["value"] = row.get("default_value")
+    return row
+
+
 def _seed_column_defaults(conn: sqlite3.Connection) -> None:
     for item in SEEDED_COLUMN_DEFAULTS:
         conn.execute(
@@ -342,5 +360,49 @@ def _seed_column_defaults(conn: sqlite3.Connection) -> None:
                 item["default_value"],
                 item["value_type"],
                 item["description"],
+            ),
+        )
+        _upgrade_legacy_seed_default(conn, item)
+        conn.execute(
+            """
+            UPDATE column_defaults
+            SET description = ?
+            WHERE column_name = ?
+            """,
+            (item["description"], item["column_name"]),
+        )
+
+
+def _upgrade_legacy_seed_default(
+    conn: sqlite3.Connection,
+    seed_item: dict[str, str],
+) -> None:
+    if seed_item["column_name"] != "SI Number":
+        return
+
+    row = conn.execute(
+        """
+        SELECT default_value, value_type
+        FROM column_defaults
+        WHERE column_name = ?
+        """,
+        (seed_item["column_name"],),
+    ).fetchone()
+    if row is None:
+        return
+
+    if row["default_value"] == "NA" and row["value_type"] == "string":
+        conn.execute(
+            """
+            UPDATE column_defaults
+            SET default_value = ?,
+                value_type = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE column_name = ?
+            """,
+            (
+                seed_item["default_value"],
+                seed_item["value_type"],
+                seed_item["column_name"],
             ),
         )

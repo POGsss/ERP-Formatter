@@ -1,5 +1,10 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
+import type {
+  InputHTMLAttributes,
+  ReactNode,
+  SelectHTMLAttributes,
+} from "react";
 
 type ButtonVariant = "primary" | "secondary" | "muted";
 
@@ -117,6 +122,40 @@ export function ActionButton({
   );
 }
 
+export function TextInput({
+  className = "",
+  ...props
+}: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      className={`h-9 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm text-black outline-none transition placeholder:text-zinc-400 focus:border-black focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 ${className}`}
+      {...props}
+    />
+  );
+}
+
+export function SelectInput({
+  children,
+  className = "",
+  ...props
+}: SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <span className={`relative block ${className}`}>
+      <select
+        className="h-9 w-full appearance-none rounded-lg border border-zinc-300 bg-white px-3 py-1.5 pr-9 text-sm font-medium text-black outline-none transition focus:border-black focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500"
+        {...props}
+      >
+        {children}
+      </select>
+      <ChevronDown
+        aria-hidden="true"
+        className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500"
+        strokeWidth={1.8}
+      />
+    </span>
+  );
+}
+
 export function Message({
   children,
   tone,
@@ -126,8 +165,8 @@ export function Message({
 }) {
   const classes =
     tone === "error"
-      ? "border-red-200 bg-red-50 text-red-700"
-      : "border-emerald-200 bg-emerald-50 text-emerald-700";
+      ? "border-zinc-400 bg-zinc-100 text-black"
+      : "border-zinc-300 bg-white text-black";
 
   return (
     <p className={`rounded-lg border px-4 py-3 text-sm font-medium ${classes}`}>
@@ -156,9 +195,20 @@ export function TableFrame({ children }: { children: ReactNode }) {
   );
 }
 
-export function TableHeaderCell({ children }: { children: ReactNode }) {
+export function TableHeaderCell({
+  children,
+  className = "",
+  title,
+}: {
+  children: ReactNode;
+  className?: string;
+  title?: string;
+}) {
   return (
-    <th className="whitespace-nowrap border-b border-r border-zinc-800 bg-black px-4 py-3 text-left text-xs font-semibold uppercase text-white last:border-r-0">
+    <th
+      className={`whitespace-nowrap border-b border-r border-zinc-800 bg-black px-4 py-3 text-left text-xs font-semibold uppercase text-white ${className} last:border-r-0`}
+      title={title}
+    >
       {children}
     </th>
   );

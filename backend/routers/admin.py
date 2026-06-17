@@ -1,6 +1,6 @@
 import json
 from contextlib import closing
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +29,13 @@ from .upload import _optional_filename, _preview_records
 
 router = APIRouter(prefix="/admin")
 
-VALID_DEFAULT_TYPES = {"string", "int", "float"}
+VALID_DEFAULT_TYPES = {"string", "int", "float", "date", "formula"}
 
 
 class DefaultUpdateRequest(BaseModel):
-    default_value: str
+    value: str | None = None
+    default_value: str | None = None
+    value_type: str | None = None
 
 
 @router.get("/stats")
@@ -229,11 +231,27 @@ async def update_default(column: str, request: DefaultUpdateRequest):
                     },
                 )
 
-            normalized_value = _normalize_default_value(
-                request.default_value,
-                str(existing["value_type"]),
+            normalized_value_type = _normalize_default_type(
+                request.value_type or str(existing["value_type"]),
             )
-            updated = update_column_default(conn, column, normalized_value)
+            requested_value = (
+                request.value
+                if request.value is not None
+                else request.default_value
+            )
+            if requested_value is None:
+                requested_value = str(existing["default_value"])
+
+            normalized_value = _normalize_default_value(
+                requested_value,
+                normalized_value_type,
+            )
+            updated = update_column_default(
+                conn,
+                column,
+                normalized_value,
+                normalized_value_type,
+            )
     except ValueError as exc:
         return JSONResponse(
             status_code=400,
@@ -310,8 +328,8 @@ def _resolve_source_file(filename: str) -> Path:
 
 
 def _normalize_default_value(value: str, value_type: str) -> str:
-    if value_type not in VALID_DEFAULT_TYPES:
-        raise ValueError(f'Unsupported value type "{value_type}".')
+    if value_type == "formula":
+        return str(value)
 
     if value_type == "int":
         try:
@@ -325,7 +343,28 @@ def _normalize_default_value(value: str, value_type: str) -> str:
         except (TypeError, ValueError) as exc:
             raise ValueError("Default value must be a number.") from exc
 
+    if value_type == "date":
+        text_value = str(value).strip()
+        if text_value.startswith("(") and text_value.endswith(")"):
+            return text_value
+        if text_value == "":
+            raise ValueError("Default value must be a date.")
+        for date_format in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+            try:
+                parsed = datetime.strptime(text_value, date_format)
+                return parsed.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        raise ValueError("Default value must be a date.")
+
     return str(value)
+
+
+def _normalize_default_type(value_type: str) -> str:
+    normalized_type = str(value_type).strip().lower()
+    if normalized_type not in VALID_DEFAULT_TYPES:
+        raise ValueError(f'Unsupported value type "{value_type}".')
+    return normalized_type
 
 
 def _insert_audit(

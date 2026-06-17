@@ -15,6 +15,10 @@ export interface ColumnSummaryItem {
   column: string;
   source: string;
   status: "mapped" | "hardcoded" | "defaulted" | "computed";
+  note?: string;
+  required?: boolean;
+  value_type?: string;
+  description?: string;
 }
 
 export interface SuggestionItem {

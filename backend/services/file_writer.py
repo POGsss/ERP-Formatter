@@ -1,11 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
 
 try:
     from .transformer import TransformResult
@@ -17,32 +15,14 @@ except ImportError:
 
 
 MAIN_SHEET_NAME = "ERP Import"
-SUMMARY_SHEET_NAME = "Column Summary"
 
 NUMBER_COLUMNS = {
     "Quantity",
-    "Price",
-    "Total Amount",
-    "Vat Payable",
-    "Class",
-    "Active",
+    "Unit Price",
+    "Amount",
+    "Term Amount",
 }
-DATE_COLUMNS = {"Date", "Order Date"}
-
-HEADER_FILL = PatternFill(fill_type="solid", fgColor="2E75B6")
-HEADER_FONT = Font(bold=True, color="FFFFFF", size=11)
-HEADER_ALIGNMENT = Alignment(horizontal="center")
-
-WHITE_FILL = PatternFill(fill_type="solid", fgColor="FFFFFF")
-GRAY_FILL = PatternFill(fill_type="solid", fgColor="F2F2F2")
-DEFAULTED_FILL = PatternFill(fill_type="solid", fgColor="FFFACD")
-
-SUMMARY_STATUS_FILLS = {
-    "mapped": PatternFill(fill_type="solid", fgColor="C6EFCE"),
-    "hardcoded": PatternFill(fill_type="solid", fgColor="BDD7EE"),
-    "defaulted": PatternFill(fill_type="solid", fgColor="FFEB9C"),
-}
-ERROR_FILL = PatternFill(fill_type="solid", fgColor="FFC7CE")
+DATE_COLUMNS = {"Invoice Date"}
 
 
 class FileWriter:
@@ -66,17 +46,15 @@ class FileWriter:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = f"erp_output_{timestamp}.xlsx"
+        timestamp = datetime.now().strftime("%Y%S%M%H")
+        output_filename = f"output_{timestamp}.xlsx"
         full_output_path = output_path / output_filename
 
         workbook = Workbook()
         main_sheet = workbook.active
         main_sheet.title = MAIN_SHEET_NAME
 
-        defaulted_columns = _columns_by_status(result.column_summary, "defaulted")
-        self._write_main_sheet(main_sheet, result.output_df, defaulted_columns)
-        self._write_column_summary_sheet(workbook, result.column_summary)
+        self._write_main_sheet(main_sheet, result.output_df)
 
         workbook.save(full_output_path)
 
@@ -95,76 +73,24 @@ class FileWriter:
         self,
         sheet,
         dataframe: pd.DataFrame,
-        defaulted_columns: set[str],
     ) -> None:
-        sheet.sheet_view.showGridLines = False
-        sheet.freeze_panes = "A2"
-
         for column_index, column_name in enumerate(dataframe.columns, start=1):
-            cell = sheet.cell(row=1, column=column_index, value=column_name)
-            cell.font = HEADER_FONT
-            cell.fill = HEADER_FILL
-            cell.alignment = HEADER_ALIGNMENT
+            sheet.cell(row=1, column=column_index, value=column_name)
 
         for row_index, row in enumerate(dataframe.itertuples(index=False), start=2):
-            row_fill = WHITE_FILL if row_index % 2 == 0 else GRAY_FILL
             for column_index, value in enumerate(row, start=1):
                 column_name = str(dataframe.columns[column_index - 1])
-                cell = sheet.cell(
+                sheet.cell(
                     row=row_index,
                     column=column_index,
                     value=_excel_value(value, column_name),
                 )
-                cell.fill = (
-                    DEFAULTED_FILL if column_name in defaulted_columns else row_fill
-                )
 
-                if column_name in NUMBER_COLUMNS:
-                    cell.number_format = "#,##0.00"
-                elif column_name in DATE_COLUMNS:
-                    cell.number_format = "@"
-
-        _auto_fit_columns(sheet)
-
-    def _write_column_summary_sheet(
-        self,
-        workbook: Workbook,
-        column_summary: list[dict],
-    ) -> None:
-        sheet = workbook.create_sheet(SUMMARY_SHEET_NAME)
-        sheet.sheet_view.showGridLines = False
-        sheet.freeze_panes = "A2"
-
-        headers = ["ERP Column", "Source", "Status", "Notes"]
-        for column_index, header in enumerate(headers, start=1):
-            cell = sheet.cell(row=1, column=column_index, value=header)
-            cell.font = HEADER_FONT
-            cell.fill = HEADER_FILL
-            cell.alignment = HEADER_ALIGNMENT
-
-        for row_index, item in enumerate(column_summary, start=2):
-            status = str(item.get("status", "")).lower()
-            source = str(item.get("source", ""))
-            values = [
-                item.get("column", ""),
-                source,
-                status,
-                _summary_notes(item),
-            ]
-            fill = SUMMARY_STATUS_FILLS.get(status, WHITE_FILL)
-
-            for column_index, value in enumerate(values, start=1):
-                cell = sheet.cell(row=row_index, column=column_index, value=value)
-                cell.fill = fill
-
-        _auto_fit_columns(sheet)
 
     def _write_error_report(self, errors: list[Any], output_path: Path) -> None:
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "Errors"
-        sheet.sheet_view.showGridLines = False
-        sheet.freeze_panes = "A2"
 
         headers = [
             "Row Number",
@@ -173,10 +99,7 @@ class FileWriter:
             "Original POS Value",
         ]
         for column_index, header in enumerate(headers, start=1):
-            cell = sheet.cell(row=1, column=column_index, value=header)
-            cell.font = HEADER_FONT
-            cell.fill = ERROR_FILL
-            cell.alignment = HEADER_ALIGNMENT
+            sheet.cell(row=1, column=column_index, value=header)
 
         for row_index, error in enumerate(errors, start=2):
             parsed_error = _parse_error(error)
@@ -187,27 +110,58 @@ class FileWriter:
                 parsed_error["original_pos_value"],
             ]
             for column_index, value in enumerate(values, start=1):
-                cell = sheet.cell(row=row_index, column=column_index, value=value)
-                cell.fill = ERROR_FILL
+                sheet.cell(row=row_index, column=column_index, value=value)
 
-        _auto_fit_columns(sheet)
         workbook.save(output_path)
-
-
-def _columns_by_status(column_summary: list[dict], status: str) -> set[str]:
-    return {
-        str(item.get("column", ""))
-        for item in column_summary
-        if str(item.get("status", "")).lower() == status
-    }
 
 
 def _excel_value(value: Any, column_name: str) -> Any:
     if column_name in DATE_COLUMNS:
-        return "" if _is_missing(value) else str(value)
+        return _excel_date_value(value)
+    if column_name in NUMBER_COLUMNS:
+        return _excel_number_value(value)
     if _is_missing(value):
         return ""
     return value
+
+
+def _excel_number_value(value: Any) -> int | float | str:
+    if _is_missing(value):
+        return ""
+    if isinstance(value, int | float):
+        return value
+
+    text_value = str(value).strip().replace(",", "")
+    if text_value == "":
+        return ""
+
+    try:
+        parsed = float(text_value)
+    except ValueError:
+        return text_value
+
+    if parsed.is_integer() and str(value).strip().isdigit():
+        return int(parsed)
+    return parsed
+
+
+def _excel_date_value(value: Any) -> date | str:
+    if _is_missing(value):
+        return ""
+    if isinstance(value, pd.Timestamp):
+        return value.date()
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+
+    text_value = str(value).strip()
+    for date_format in ("%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text_value, date_format).date()
+        except ValueError:
+            continue
+    return text_value
 
 
 def _is_missing(value: Any) -> bool:
@@ -217,32 +171,6 @@ def _is_missing(value: Any) -> bool:
         return bool(pd.isna(value))
     except (TypeError, ValueError):
         return False
-
-
-def _summary_notes(item: dict) -> str:
-    status = str(item.get("status", "")).lower()
-    source = str(item.get("source", ""))
-
-    if status == "mapped":
-        return f"Mapped from POS: {_extract_input_column(source)}"
-    if status == "hardcoded":
-        return f"Hardcoded value: {_extract_value(source)}"
-    if status == "defaulted":
-        return f"No POS source - defaulted to {_extract_value(source)}"
-    return source
-
-
-def _extract_input_column(source: str) -> str:
-    if '["' in source and '"]' in source:
-        return source.split('["', 1)[1].split('"]', 1)[0]
-    return source
-
-
-def _extract_value(source: str) -> str:
-    for separator in ("->", "Hardcoded"):
-        if separator in source:
-            return source.split(separator, 1)[1].strip()
-    return source
 
 
 def _parse_error(error: Any) -> dict[str, Any]:
@@ -276,19 +204,6 @@ def _parse_error(error: Any) -> dict[str, Any]:
         "error_message": str(error),
         "original_pos_value": "",
     }
-
-
-def _auto_fit_columns(sheet) -> None:
-    for column_cells in sheet.columns:
-        column_letter = get_column_letter(column_cells[0].column)
-        max_length = 0
-        for cell in column_cells:
-            if cell.value is None:
-                continue
-            max_length = max(max_length, len(str(cell.value)))
-
-        sheet.column_dimensions[column_letter].width = min(max(max_length + 4, 10), 45)
-
 
 def _resolve_project_path(relative_path: str) -> Path:
     project_root_path = Path(relative_path)

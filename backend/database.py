@@ -73,6 +73,12 @@ SEEDED_COLUMN_DEFAULTS = [
         "description": "VAT + VAT Adjustment.",
     },
     {
+        "column_name": "Term Code",
+        "default_value": "V",
+        "value_type": "string",
+        "description": "ERP payment term code.",
+    },
+    {
         "column_name": "Customer Code",
         "default_value": "NA",
         "value_type": "string",
@@ -267,10 +273,11 @@ def get_column_defaults(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 WHEN 'Unit Price' THEN 5
                 WHEN 'Amount' THEN 6
                 WHEN 'Term Amount' THEN 7
-                WHEN 'Customer Code' THEN 8
-                WHEN 'Doc Class' THEN 9
-                WHEN 'Currency Code' THEN 10
-                WHEN 'Remarks' THEN 11
+                WHEN 'Term Code' THEN 8
+                WHEN 'Customer Code' THEN 9
+                WHEN 'Doc Class' THEN 10
+                WHEN 'Currency Code' THEN 11
+                WHEN 'Remarks' THEN 12
                 ELSE 99
             END,
             column_name

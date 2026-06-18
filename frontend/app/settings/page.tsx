@@ -255,7 +255,7 @@ export default function DefaultSettingsPage() {
             </thead>
             <tbody className="bg-white">
               {isLoading ? (
-                Array.from({ length: 11 }).map((_, index) => (
+                Array.from({ length: 12 }).map((_, index) => (
                   <tr key={index}>
                     <TableCell>
                       <SkeletonLine className="h-4 w-40" />

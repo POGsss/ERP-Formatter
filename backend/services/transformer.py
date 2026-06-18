@@ -16,6 +16,7 @@ OUTPUT_COLUMNS = [
     "Unit Price",
     "Amount",
     "Term Amount",
+    "Term Code",
     "Customer Code",
     "Doc Class",
     "Currency Code",
@@ -57,6 +58,11 @@ FALLBACK_COLUMN_DEFAULTS = {
         "default_value": "(formula)",
         "value_type": "formula",
         "description": "VAT + VAT Adjustment.",
+    },
+    "Term Code": {
+        "default_value": "V",
+        "value_type": "string",
+        "description": "ERP payment term code.",
     },
     "Customer Code": {
         "default_value": "NA",
@@ -123,6 +129,7 @@ NATIVE_COLUMN_SUMMARY = {
 CONSTANT_COLUMN_STATUS = {
     "Product Code": "defaulted",
     "Quantity": "hardcoded",
+    "Term Code": "defaulted",
     "Customer Code": "defaulted",
     "Doc Class": "defaulted",
     "Currency Code": "hardcoded",
@@ -225,6 +232,13 @@ class DataTransformer:
                     ),
                     "Term Amount": self._column_value(
                         "Term Amount",
+                        row,
+                        pos_date_info,
+                        si_date_info,
+                        defaults,
+                    ),
+                    "Term Code": self._column_value(
+                        "Term Code",
                         row,
                         pos_date_info,
                         si_date_info,

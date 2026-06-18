@@ -1,4 +1,4 @@
-import { ActionButton } from "./ui";
+import { Eye, Loader2, Trash2 } from "lucide-react";
 
 export interface RecentUploadItem {
   id: number;
@@ -20,8 +20,10 @@ interface RecentUploadPanelProps {
   uploads: RecentUploadItem[];
   isLoading: boolean;
   isActionDisabled: boolean;
+  deletingUploadId: number | null;
   processingUploadId: number | null;
   selectedUploadId: number | null;
+  onDelete: (upload: RecentUploadItem) => void;
   onSelect: (upload: RecentUploadItem) => void;
 }
 
@@ -50,8 +52,10 @@ export function RecentUploadPanel({
   uploads,
   isLoading,
   isActionDisabled,
+  deletingUploadId,
   processingUploadId,
   selectedUploadId,
+  onDelete,
   onSelect,
 }: RecentUploadPanelProps) {
   return (
@@ -75,6 +79,7 @@ export function RecentUploadPanel({
         ) : (
           uploads.map((upload) => {
             const isSelected = selectedUploadId === upload.id;
+            const isDeleting = deletingUploadId === upload.id;
             const isProcessing = processingUploadId === upload.id;
 
             return (
@@ -98,27 +103,38 @@ export function RecentUploadPanel({
                   </p>
                 </div>
                 <div className="flex flex-wrap justify-start gap-2 md:justify-end">
-                  {upload.download_url ? (
-                    <ActionButton
-                      href={upload.download_url}
-                      download
-                      className="min-h-9 px-3 py-1.5 text-xs"
-                    >
-                      Download
-                    </ActionButton>
-                  ) : (
-                    <span className="inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-500">
-                      No output
-                    </span>
-                  )}
-                  <ActionButton
-                    variant="secondary"
+                  <button
+                    type="button"
+                    aria-label={`Select ${upload.original_name}`}
+                    title={isProcessing ? "Processing" : "Select upload"}
                     onClick={() => onSelect(upload)}
                     disabled={isActionDisabled || isSelected}
-                    className="min-h-9 px-3 py-1.5 text-xs"
+                    className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border text-black transition disabled:cursor-not-allowed disabled:text-zinc-400 ${
+                      isSelected
+                        ? "border-black bg-black text-white"
+                        : "border-zinc-300 bg-white hover:bg-zinc-50"
+                    }`}
                   >
-                    {isProcessing ? "Processing" : isSelected ? "Selected" : "Select"}
-                  </ActionButton>
+                    {isProcessing ? (
+                      <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Eye aria-hidden="true" className="h-4 w-4" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${upload.original_name}`}
+                    title={isDeleting ? "Deleting" : "Delete upload"}
+                    onClick={() => onDelete(upload)}
+                    disabled={isActionDisabled || isDeleting || isProcessing}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-300 bg-white text-black transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+                  >
+                    {isDeleting ? (
+                      <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 aria-hidden="true" className="h-4 w-4" />
+                    )}
+                  </button>
                 </div>
               </article>
             );

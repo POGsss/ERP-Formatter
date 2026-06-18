@@ -187,10 +187,18 @@ export function SkeletonLine({ className = "" }: { className?: string }) {
   return <div className={`rounded-full bg-zinc-200 ${className}`} />;
 }
 
-export function TableFrame({ children }: { children: ReactNode }) {
+export function TableFrame({
+  children,
+  fitContent = false,
+}: {
+  children: ReactNode;
+  fitContent?: boolean;
+}) {
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-300 bg-white">
-      <div className="max-h-[650px] overflow-auto">{children}</div>
+      <div className={fitContent ? "overflow-x-auto" : "max-h-[650px] overflow-auto"}>
+        {children}
+      </div>
     </div>
   );
 }

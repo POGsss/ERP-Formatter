@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from config import OUTPUT_DIR, UPLOAD_DIR
 from database import (
     count_uploads,
+    delete_upload,
     get_column_default,
     get_column_defaults,
     get_db,
@@ -89,6 +90,46 @@ async def admin_uploads(
     }
 
 
+@router.delete("/uploads/{upload_id}")
+async def delete_admin_upload(upload_id: int):
+    try:
+        with closing(get_db()) as conn:
+            upload = get_upload(conn, upload_id)
+            if upload is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "error": "upload_not_found",
+                        "detail": "Upload was not found.",
+                    },
+                )
+
+            try:
+                _delete_upload_artifacts(upload, include_source=True)
+            except ValueError as exc:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "invalid_upload_file",
+                        "detail": str(exc),
+                    },
+                )
+            except OSError as exc:
+                return JSONResponse(
+                    status_code=500,
+                    content={
+                        "error": "file_delete_failed",
+                        "detail": f"Unable to delete upload files: {exc}",
+                    },
+                )
+
+            delete_upload(conn, upload_id)
+    except Exception as exc:
+        return _server_error(exc)
+
+    return {"status": "deleted", "upload_id": upload_id}
+
+
 @router.post("/uploads/{upload_id}/reprocess")
 async def reprocess_upload(upload_id: int):
     try:
@@ -128,10 +169,13 @@ async def reprocess_upload(upload_id: int):
                 {
                     "status": "processing",
                     "error_count": 0,
+                    "output_file": None,
+                    "error_report": None,
                 },
             )
 
             try:
+                _delete_upload_artifacts(upload, include_source=False)
                 read_result = FileReader().read(str(source_path))
                 transform_result = DataTransformer().transform(read_result["dataframe"])
                 write_result = FileWriter().write(transform_result, OUTPUT_DIR)
@@ -325,6 +369,35 @@ def _resolve_source_file(filename: str) -> Path:
     if not source_path.is_file():
         raise FileNotFoundError(filename)
     return source_path
+
+
+def _delete_upload_artifacts(
+    upload: dict[str, Any],
+    *,
+    include_source: bool,
+) -> None:
+    _delete_named_file(OUTPUT_DIR, upload.get("output_file"))
+    _delete_named_file(OUTPUT_DIR, upload.get("error_report"))
+
+    if include_source:
+        _delete_named_file(UPLOAD_DIR, upload.get("filename"))
+
+
+def _delete_named_file(directory: str, filename: Any) -> None:
+    if not filename:
+        return
+
+    filename_value = str(filename)
+    if ".." in filename_value or "/" in filename_value or "\\" in filename_value:
+        raise ValueError("Stored filename is not allowed.")
+
+    base_dir = Path(directory).resolve()
+    file_path = (base_dir / filename_value).resolve()
+    if file_path.parent != base_dir:
+        raise ValueError("Stored filename is not allowed.")
+
+    if file_path.is_file():
+        file_path.unlink()
 
 
 def _normalize_default_value(value: str, value_type: str) -> str:

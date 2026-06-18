@@ -144,6 +144,7 @@ export default function HomePage() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [reprocessingId, setReprocessingId] = useState<number | null>(null);
+  const [deletingUploadId, setDeletingUploadId] = useState<number | null>(null);
   const [dropZoneResetKey, setDropZoneResetKey] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -466,9 +467,54 @@ export default function HomePage() {
     }
   };
 
+  const handleDeleteRecentUpload = async (upload: RecentUploadItem) => {
+    if (deletingUploadId !== null || isProcessing || isAnalyzing) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `Delete "${upload.original_name}" and its stored files?`,
+    );
+    if (!shouldDelete) {
+      return;
+    }
+
+    setDeletingUploadId(upload.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch(`/api/admin/uploads/${upload.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        setError(await getErrorMessage(response));
+        return;
+      }
+
+      setRecentUploads((currentUploads) =>
+        currentUploads.filter((currentUpload) => currentUpload.id !== upload.id),
+      );
+      setSelectedUpload((currentUpload) =>
+        currentUpload?.id === upload.id ? null : currentUpload,
+      );
+      setActiveResult((currentResult) =>
+        currentResult?.upload_id === upload.id ? null : currentResult,
+      );
+      setNotice("Recent upload deleted.");
+      await loadWorkspaceData();
+    } catch {
+      setError("Delete failed. Check that the backend server is running.");
+    } finally {
+      setDeletingUploadId(null);
+    }
+  };
+
   const isProcessDisabled =
     isProcessing ||
     isAnalyzing ||
+    deletingUploadId !== null ||
     (mode === "standard"
       ? !file && !selectedUpload
       : !file || !templateFile);
@@ -605,10 +651,12 @@ export default function HomePage() {
           <RecentUploadPanel
             uploads={recentUploads}
             isLoading={isLoadingHistory}
-            isActionDisabled={isProcessing || isAnalyzing}
+            isActionDisabled={isProcessing || isAnalyzing || deletingUploadId !== null}
+            deletingUploadId={deletingUploadId}
             height={uploadColumnHeight}
             processingUploadId={reprocessingId}
             selectedUploadId={selectedUpload?.id ?? null}
+            onDelete={handleDeleteRecentUpload}
             onSelect={handleSelectRecentUpload}
           />
         </section>

@@ -46,12 +46,12 @@ FALLBACK_COLUMN_DEFAULTS = {
     "Unit Price": {
         "default_value": "(formula)",
         "value_type": "formula",
-        "description": "Net Sales less VAT and VAT Adjustment divided by Quantity.",
+        "description": "(Net Sales - VAT - VAT Adjustment) / Quantity.",
     },
     "Amount": {
         "default_value": "(formula)",
         "value_type": "formula",
-        "description": "Net Sales less VAT and VAT Adjustment.",
+        "description": "Net Sales - VAT - VAT Adjustment.",
     },
     "Term Amount": {
         "default_value": "(formula)",
@@ -326,22 +326,11 @@ class DataTransformer:
         if column == "Invoice Date":
             return pos_date_info.invoice_date
         if column == "Unit Price":
-            net_sales = _numeric_from_row(row, "Net Sales")
-            total_vat = (
-                _numeric_from_row(row, "VAT")
-                + _numeric_from_row(row, "VAT Adjustment")
-            )
-            calculated_amount = net_sales - total_vat
             qty_value, qty_valid = _try_parse_float(_source_value(row, "Quantity"))
             quantity = qty_value if (qty_valid and qty_value > 0) else 1.0
-            return _round_money(calculated_amount / quantity)
+            return _round_money(_amount_excluding_vat(row) / quantity)
         if column == "Amount":
-            net_sales = _numeric_from_row(row, "Net Sales")
-            total_vat = (
-                _numeric_from_row(row, "VAT")
-                + _numeric_from_row(row, "VAT Adjustment")
-            )
-            return _round_money(net_sales - total_vat)
+            return _round_money(_amount_excluding_vat(row))
         if column == "Term Amount":
             return _round_money(
                 _numeric_from_row(row, "VAT")
@@ -519,6 +508,14 @@ def _numeric_from_row(row: pd.Series, source_column: str) -> float:
     value = _source_value(row, source_column)
     parsed_value, _ = _try_parse_float(value)
     return parsed_value
+
+
+def _amount_excluding_vat(row: pd.Series) -> float:
+    return (
+        _numeric_from_row(row, "Net Sales")
+        - _numeric_from_row(row, "VAT")
+        - _numeric_from_row(row, "VAT Adjustment")
+    )
 
 
 def _round_money(value: float) -> float:

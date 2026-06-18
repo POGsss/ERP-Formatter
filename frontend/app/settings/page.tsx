@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Pencil, X } from "lucide-react";
 import {
   ActionButton,
   AppShell,
@@ -241,7 +242,7 @@ export default function DefaultSettingsPage() {
           </ActionButton>
         </div>
 
-        <TableFrame>
+        <TableFrame fitContent>
           <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
             <thead className="sticky top-0 z-10">
               <tr>
@@ -354,24 +355,28 @@ export default function DefaultSettingsPage() {
                             >
                               {isSaving ? "Saving" : "Save"}
                             </ActionButton>
-                            <ActionButton
-                              variant="secondary"
+                            <button
+                              type="button"
+                              aria-label="Cancel"
+                              title="Cancel"
                               onClick={cancelEdit}
                               disabled={savingColumn !== null}
-                              className="min-h-9 px-3 py-1.5 text-xs"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-300 bg-white text-black transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
                             >
-                              Cancel
-                            </ActionButton>
+                              <X aria-hidden="true" className="h-4 w-4" />
+                            </button>
                           </div>
                         ) : (
-                          <ActionButton
-                            variant="secondary"
+                          <button
+                            type="button"
+                            aria-label="Edit"
+                            title="Edit"
                             onClick={() => startEdit(item)}
                             disabled={savingColumn !== null}
-                            className="min-h-9 px-3 py-1.5 text-xs"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-300 bg-white text-black transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
                           >
-                            Edit
-                          </ActionButton>
+                            <Pencil aria-hidden="true" className="h-4 w-4" />
+                          </button>
                         )}
                       </TableCell>
                     </tr>

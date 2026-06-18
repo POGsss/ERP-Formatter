@@ -58,7 +58,7 @@ SEEDED_COLUMN_DEFAULTS = [
         "column_name": "Unit Price",
         "default_value": "(formula)",
         "value_type": "formula",
-        "description": "Net Sales - VAT - VAT Adjustment / Quantity.",
+        "description": "(Net Sales - VAT - VAT Adjustment) / Quantity.",
     },
     {
         "column_name": "Amount",
@@ -196,6 +196,13 @@ def update_upload(
         values,
     )
     conn.commit()
+
+
+def delete_upload(conn: sqlite3.Connection, upload_id: int) -> bool:
+    conn.execute("DELETE FROM audit_log WHERE upload_id = ?", (upload_id,))
+    cursor = conn.execute("DELETE FROM uploads WHERE id = ?", (upload_id,))
+    conn.commit()
+    return cursor.rowcount > 0
 
 
 def insert_audit(conn: sqlite3.Connection, data: dict[str, Any]) -> None:

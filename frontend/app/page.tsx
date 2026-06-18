@@ -528,7 +528,7 @@ export default function HomePage() {
   const previewTotalRows = activeResult?.row_count ?? 0;
 
   return (
-    <AppShell title="ERP Formatter" actionHref="/settings" actionLabel="Default Settings">
+    <AppShell title="ERP Formatter" actionHref="/settings" actionLabel="Settings">
         <section
           aria-label="Workspace stats"
           className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4"

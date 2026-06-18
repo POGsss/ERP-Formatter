@@ -215,7 +215,7 @@ export default function DefaultSettingsPage() {
   };
 
   return (
-    <AppShell title="Default Settings" actionHref="/" actionLabel="Back">
+    <AppShell title="Settings" actionHref="/" actionLabel="Back">
       {(error || notice) ? (
         <section className="grid gap-3">
           {error ? <Message tone="error">{error}</Message> : null}

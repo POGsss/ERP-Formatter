@@ -18,6 +18,7 @@ UPLOAD_COLUMNS = {
     "output_file",
     "error_report",
     "uploader_ip",
+    "template",
 }
 
 AUDIT_COLUMNS = {
@@ -136,10 +137,19 @@ def init_db() -> None:
                 error_count INTEGER DEFAULT 0,
                 output_file TEXT,
                 error_report TEXT,
-                uploader_ip TEXT
+                uploader_ip TEXT,
+                template TEXT DEFAULT 'old_pos'
             )
             """
         )
+        upload_column_names = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(uploads)").fetchall()
+        }
+        if "template" not in upload_column_names:
+            connection.execute(
+                "ALTER TABLE uploads ADD COLUMN template TEXT DEFAULT 'old_pos'"
+            )
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS audit_log (

@@ -1,6 +1,14 @@
+export interface Template {
+  key: string;
+  label: string;
+  description: string;
+  is_default: boolean;
+}
+
 export interface UploadResult {
   upload_id: number;
   status: "done" | "error";
+  original_filename: string;
   row_count: number;
   error_count: number;
   warnings: string[];
@@ -19,19 +27,4 @@ export interface ColumnSummaryItem {
   required?: boolean;
   value_type?: string;
   description?: string;
-}
-
-export interface SuggestionItem {
-  output_col: string;
-  suggested_input_col: string | null;
-  confidence: number;
-  match_reason: string;
-}
-
-export interface MappingItem {
-  output_col: string;
-  source: "direct" | "hardcoded";
-  input_col?: string;
-  transform?: string;
-  value?: string;
 }

@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,8 @@ class FileWriter:
         result: TransformResult,
         output_dir: str,
         template_name: str = "erp-output",
+        number_columns: Collection[str] | None = None,
+        date_columns: Collection[str] | None = None,
     ) -> dict[str, str | None]:
         """
         Writes the output Excel file.
@@ -54,7 +57,12 @@ class FileWriter:
         main_sheet = workbook.active
         main_sheet.title = MAIN_SHEET_NAME
 
-        self._write_main_sheet(main_sheet, result.output_df)
+        self._write_main_sheet(
+            main_sheet,
+            result.output_df,
+            number_columns=number_columns,
+            date_columns=date_columns,
+        )
 
         workbook.save(full_output_path)
 
@@ -73,7 +81,14 @@ class FileWriter:
         self,
         sheet,
         dataframe: pd.DataFrame,
+        number_columns: Collection[str] | None = None,
+        date_columns: Collection[str] | None = None,
     ) -> None:
+        resolved_number_columns = (
+            NUMBER_COLUMNS if number_columns is None else number_columns
+        )
+        resolved_date_columns = DATE_COLUMNS if date_columns is None else date_columns
+
         for column_index, column_name in enumerate(dataframe.columns, start=1):
             sheet.cell(row=1, column=column_index, value=column_name)
 
@@ -83,7 +98,12 @@ class FileWriter:
                 sheet.cell(
                     row=row_index,
                     column=column_index,
-                    value=_excel_value(value, column_name),
+                    value=_excel_value(
+                        value,
+                        column_name,
+                        number_columns=resolved_number_columns,
+                        date_columns=resolved_date_columns,
+                    ),
                 )
 
 
@@ -115,10 +135,20 @@ class FileWriter:
         workbook.save(output_path)
 
 
-def _excel_value(value: Any, column_name: str) -> Any:
-    if column_name in DATE_COLUMNS:
+def _excel_value(
+    value: Any,
+    column_name: str,
+    number_columns: Collection[str] | None = None,
+    date_columns: Collection[str] | None = None,
+) -> Any:
+    resolved_number_columns = (
+        NUMBER_COLUMNS if number_columns is None else number_columns
+    )
+    resolved_date_columns = DATE_COLUMNS if date_columns is None else date_columns
+
+    if column_name in resolved_date_columns:
         return _excel_date_value(value)
-    if column_name in NUMBER_COLUMNS:
+    if column_name in resolved_number_columns:
         return _excel_number_value(value)
     if _is_missing(value):
         return ""

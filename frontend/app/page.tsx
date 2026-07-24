@@ -9,7 +9,6 @@ import {
   useState,
 } from "react";
 import { DropZone } from "../components/DropZone";
-import { MappingReviewTable } from "../components/MappingReviewTable";
 import { PreviewTable } from "../components/PreviewTable";
 import {
   RecentUploadPanel,
@@ -24,15 +23,31 @@ import {
   Panel,
   StatCard,
 } from "../components/ui";
-import type { MappingItem, SuggestionItem, UploadResult } from "../types";
+import type { Template, UploadResult } from "../types";
 
 const MAX_FILE_SIZE_MB = 10;
 const ALLOWED_TYPES = [".xlsx", ".xls", ".csv"];
 const PAGE_SIZE = 6;
 const DEFAULT_SOURCE_SYSTEM = "Mosaic POS";
+const DEFAULT_TEMPLATE_KEY = "old_pos";
 const UPLOAD_FORM_ID = "erp-upload-form";
 
-type UploadMode = "standard" | "template";
+const FALLBACK_TEMPLATES: Template[] = [
+  {
+    key: "old_pos",
+    label: "Old POS Template",
+    description: "Processes the standard POS export into the 12-column ERP format.",
+    is_default: true,
+  },
+  {
+    key: "new_pos",
+    label: "New POS Template",
+    description: "Processes payment-method breakdown exports into per-payment ERP rows.",
+    is_default: false,
+  },
+];
+
+type UploadMode = "process" | "template";
 
 interface AdminStats {
   uploads_today: number;
@@ -44,13 +59,6 @@ interface AdminStats {
 interface UploadsResponse {
   uploads: RecentUploadItem[];
   total: number;
-}
-
-interface SuggestionResult {
-  mode: "suggestion";
-  template_columns: string[];
-  pos_columns: string[];
-  suggestions: SuggestionItem[];
 }
 
 const DEFAULT_STATS: AdminStats = {
@@ -114,14 +122,13 @@ function uploadResultToRecent(
   fallbackName: string,
   sourceSystem: string,
   transactionDate: string,
+  template: string,
 ): RecentUploadItem {
   return {
     id: result.upload_id,
-    original_name:
-      "original_filename" in result && typeof result.original_filename === "string"
-        ? result.original_filename
-        : fallbackName,
+    original_name: result.original_filename || fallbackName,
     source_system: sourceSystem,
+    template,
     transaction_date: transactionDate,
     uploaded_at: new Date().toISOString(),
     status: result.status,
@@ -133,9 +140,10 @@ function uploadResultToRecent(
 }
 
 export default function HomePage() {
-  const [mode, setMode] = useState<UploadMode>("standard");
+  const [mode, setMode] = useState<UploadMode>("process");
   const [file, setFile] = useState<File | null>(null);
-  const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [templates, setTemplates] = useState<Template[]>(FALLBACK_TEMPLATES);
+  const [selectedTemplate, setSelectedTemplate] = useState(DEFAULT_TEMPLATE_KEY);
   const [activeResult, setActiveResult] = useState<UploadResult | null>(null);
   const [selectedUpload, setSelectedUpload] = useState<RecentUploadItem | null>(null);
   const uploadColumnRef = useRef<HTMLDivElement | null>(null);
@@ -148,10 +156,7 @@ export default function HomePage() {
   const [dropZoneResetKey, setDropZoneResetKey] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [posColumns, setPosColumns] = useState<string[]>([]);
-  const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [uploadColumnHeight, setUploadColumnHeight] = useState<number | null>(null);
+  const [processColumnHeight, setProcessColumnHeight] = useState<number | null>(null);
 
   const loadWorkspaceData = useCallback(async () => {
     setIsLoadingHistory(true);
@@ -186,9 +191,46 @@ export default function HomePage() {
     }
   }, []);
 
+  const loadTemplates = useCallback(async () => {
+    try {
+      const response = await fetch("/api/templates", { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("Template request failed");
+      }
+
+      const payload = (await response.json()) as Template[];
+      const availableTemplates = payload.length > 0 ? payload : FALLBACK_TEMPLATES;
+      setTemplates(availableTemplates);
+      setSelectedTemplate(
+        availableTemplates.find((template) => template.is_default)?.key ??
+          availableTemplates[0]?.key ??
+          DEFAULT_TEMPLATE_KEY,
+      );
+    } catch {
+      setTemplates(FALLBACK_TEMPLATES);
+      setSelectedTemplate(
+        FALLBACK_TEMPLATES.find((template) => template.is_default)?.key ??
+          DEFAULT_TEMPLATE_KEY,
+      );
+    }
+  }, []);
+
   useEffect(() => {
     void loadWorkspaceData();
-  }, [loadWorkspaceData]);
+    void loadTemplates();
+  }, [loadTemplates, loadWorkspaceData]);
+
+  const activeTemplate = useMemo(
+    () =>
+      templates.find((template) => template.key === selectedTemplate) ??
+      FALLBACK_TEMPLATES[0],
+    [selectedTemplate, templates],
+  );
+
+  const templateLabels = useMemo(
+    () => Object.fromEntries(templates.map((template) => [template.key, template.label])),
+    [templates],
+  );
 
   const selectedItemSummary = useMemo(() => {
     if (selectedUpload) {
@@ -215,39 +257,34 @@ export default function HomePage() {
       return;
     }
 
-    const updateUploadColumnHeight = () => {
-      setUploadColumnHeight(uploadColumn.offsetHeight);
+    const updateProcessColumnHeight = () => {
+      if (mode === "process") {
+        setProcessColumnHeight(uploadColumn.offsetHeight);
+      }
     };
 
-    updateUploadColumnHeight();
+    updateProcessColumnHeight();
 
     if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", updateUploadColumnHeight);
-      return () => window.removeEventListener("resize", updateUploadColumnHeight);
+      window.addEventListener("resize", updateProcessColumnHeight);
+      return () => window.removeEventListener("resize", updateProcessColumnHeight);
     }
 
-    const observer = new ResizeObserver(updateUploadColumnHeight);
+    const observer = new ResizeObserver(updateProcessColumnHeight);
     observer.observe(uploadColumn);
     return () => observer.disconnect();
   }, [mode, selectedItemSummary]);
-
-  const resetTemplateState = () => {
-    setPosColumns([]);
-    setSuggestions([]);
-  };
 
   const handleModeChange = (nextMode: UploadMode) => {
     setMode(nextMode);
     setSelectedUpload(null);
     setError("");
     setNotice("");
-    resetTemplateState();
   };
 
   const handleFileSelect = (selectedFile: File) => {
     setError("");
     setNotice("");
-    resetTemplateState();
     setSelectedUpload(null);
 
     if (!isAllowedFile(selectedFile) || selectedFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
@@ -258,20 +295,6 @@ export default function HomePage() {
     setFile(selectedFile);
   };
 
-  const handleTemplateFileSelect = (selectedFile: File) => {
-    setError("");
-    setNotice("");
-    resetTemplateState();
-    setSelectedUpload(null);
-
-    if (!isAllowedFile(selectedFile) || selectedFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      setTemplateFile(null);
-      return;
-    }
-
-    setTemplateFile(selectedFile);
-  };
-
   const handleUploadComplete = async (result: UploadResult) => {
     setActiveResult(result);
     setSelectedUpload(null);
@@ -279,8 +302,9 @@ export default function HomePage() {
       uploadResultToRecent(
         result,
         file?.name ?? `Upload ${result.upload_id}`,
-        mode === "template" ? "Custom Template" : DEFAULT_SOURCE_SYSTEM,
+        DEFAULT_SOURCE_SYSTEM,
         todayInputValue(),
+        selectedTemplate,
       ),
       ...currentUploads.filter((upload) => upload.id !== result.upload_id),
     ].slice(0, PAGE_SIZE));
@@ -294,7 +318,7 @@ export default function HomePage() {
     await loadWorkspaceData();
   };
 
-  const handleStandardProcess = async (event: FormEvent<HTMLFormElement>) => {
+  const handleProcess = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (isProcessing) {
@@ -314,6 +338,7 @@ export default function HomePage() {
     formData.append("file", file);
     formData.append("source_system", DEFAULT_SOURCE_SYSTEM);
     formData.append("transaction_date", todayInputValue());
+    formData.append("template", selectedTemplate);
 
     setIsProcessing(true);
     setError("");
@@ -340,86 +365,12 @@ export default function HomePage() {
     }
   };
 
-  const handleAnalyzeMapping = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!file || !templateFile || isAnalyzing) {
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("pos_file", file);
-    formData.append("template_file", templateFile);
-
-    setIsAnalyzing(true);
-    setError("");
-    setNotice("");
-    resetTemplateState();
-
-    try {
-      const response = await fetch("/api/transform/with-template", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        setError(await getErrorMessage(response));
-        return;
-      }
-
-      const result = (await response.json()) as SuggestionResult;
-      setPosColumns(result.pos_columns ?? []);
-      setSuggestions(result.suggestions ?? []);
-      setNotice("Mapping suggestions are ready for review.");
-    } catch {
-      setError("Mapping analysis failed. Check that the backend server is running.");
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  const handleConfirmMapping = async (mapping: MappingItem[]) => {
-    if (!file || isProcessing) {
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("pos_file", file);
-    formData.append("confirmed_mapping", JSON.stringify(mapping));
-
-    setIsProcessing(true);
-    setError("");
-    setNotice("");
-    setActiveResult(null);
-
-    try {
-      const response = await fetch("/api/transform/with-template", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        setError(await getErrorMessage(response));
-        return;
-      }
-
-      const result = (await response.json()) as UploadResult;
-      await handleUploadComplete(result);
-    } catch {
-      setError("Template processing failed. Check that the backend server is running.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   const handleSelectRecentUpload = (upload: RecentUploadItem) => {
     setSelectedUpload(upload);
     setFile(null);
-    setTemplateFile(null);
     setDropZoneResetKey((currentKey) => currentKey + 1);
     setError("");
     setNotice("");
-    resetTemplateState();
   };
 
   const handleSelectedUploadProcess = async (uploadId: number) => {
@@ -468,7 +419,7 @@ export default function HomePage() {
   };
 
   const handleDeleteRecentUpload = async (upload: RecentUploadItem) => {
-    if (deletingUploadId !== null || isProcessing || isAnalyzing) {
+    if (deletingUploadId !== null || isProcessing) {
       return;
     }
 
@@ -512,18 +463,11 @@ export default function HomePage() {
   };
 
   const isProcessDisabled =
-    isProcessing ||
-    isAnalyzing ||
-    deletingUploadId !== null ||
-    (mode === "standard"
-      ? !file && !selectedUpload
-      : !file || !templateFile);
+    isProcessing || deletingUploadId !== null || (!file && !selectedUpload);
   const summaryTitle = selectedUpload ? "Selected item" : "Ready to process";
-  const summaryBadge = selectedUpload
-    ? "Recent"
-    : mode === "template"
-      ? "Template"
-      : "Standard";
+  const effectiveTemplateLabel = selectedUpload
+    ? templateLabels[selectedUpload.template] ?? selectedUpload.template ?? activeTemplate.label
+    : activeTemplate.label;
   const previewRowCount = activeResult?.preview.length ?? 0;
   const previewTotalRows = activeResult?.row_count ?? 0;
 
@@ -554,29 +498,39 @@ export default function HomePage() {
         ) : null}
 
         <section className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)] lg:items-start">
-          <div ref={uploadColumnRef} className="space-y-5 self-start">
+          <div
+            ref={uploadColumnRef}
+            className={mode === "process" ? "space-y-5 self-start" : "self-start"}
+          >
             <form
               id={UPLOAD_FORM_ID}
-              onSubmit={mode === "standard" ? handleStandardProcess : handleAnalyzeMapping}
-              className="rounded-lg border border-zinc-300 bg-white p-5"
+              onSubmit={handleProcess}
+              className={`rounded-lg border border-zinc-300 bg-white p-5 ${
+                mode === "template" ? "flex flex-col" : ""
+              }`}
+              style={
+                mode === "template" && processColumnHeight
+                  ? { height: processColumnHeight }
+                  : undefined
+              }
             >
               <div
                 role="radiogroup"
-                aria-label="Upload mode"
-                className="mb-5 inline-flex rounded-lg bg-zinc-200 p-0"
+                aria-label="Workspace mode"
+                className="mb-5 inline-flex self-start rounded-lg bg-zinc-200 p-0"
               >
                 <button
                   type="button"
                   role="radio"
-                  aria-checked={mode === "standard"}
-                  onClick={() => handleModeChange("standard")}
+                  aria-checked={mode === "process"}
+                  onClick={() => handleModeChange("process")}
                   className={`min-h-9 rounded-lg px-5 text-sm font-medium transition ${
-                    mode === "standard"
+                    mode === "process"
                       ? "bg-white text-black shadow-sm ring-1 ring-zinc-300"
                       : "text-zinc-700 hover:text-black"
                   }`}
                 >
-                  Standard
+                  Process
                 </button>
                 <button
                   type="button"
@@ -593,84 +547,87 @@ export default function HomePage() {
                 </button>
               </div>
 
-              <div className="h-72">
-                {mode === "template" ? (
-                  <div className="grid h-full grid-rows-2 gap-3">
-                    <DropZone
-                      key={`pos-template-${dropZoneResetKey}`}
-                      allowedTypes={ALLOWED_TYPES}
-                      buttonClassName="h-full px-4"
-                      className="h-full min-h-0"
-                      compact
-                      label="Upload POS file"
-                      maxSizeMB={MAX_FILE_SIZE_MB}
-                      onFileSelect={handleFileSelect}
-                    />
-                    <DropZone
-                      key={`template-${dropZoneResetKey}`}
-                      allowedTypes={ALLOWED_TYPES}
-                      buttonClassName="h-full px-4"
-                      className="h-full min-h-0"
-                      compact
-                      label="Upload ERP output template"
-                      maxSizeMB={MAX_FILE_SIZE_MB}
-                      onFileSelect={handleTemplateFileSelect}
-                    />
+              {mode === "template" ? (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="mb-4">
+                    <h2 className="text-base font-semibold text-black">Choose a template</h2>
+                    <p className="mt-1 text-sm text-zinc-600">
+                      Select the output format used on the Process tab.
+                    </p>
                   </div>
-                ) : (
+                  <div role="radiogroup" aria-label="Templates" className="grid gap-3">
+                    {templates.map((template) => {
+                      const isActive = template.key === selectedTemplate;
+                      return (
+                        <button
+                          key={template.key}
+                          type="button"
+                          role="radio"
+                          aria-checked={isActive}
+                          onClick={() => setSelectedTemplate(template.key)}
+                          className={`w-full rounded-lg border p-4 text-left transition ${
+                            isActive
+                              ? "border-black bg-zinc-50 ring-1 ring-black"
+                              : "border-zinc-200 bg-white hover:border-zinc-400"
+                          }`}
+                        >
+                          <span className="flex items-center justify-between gap-3">
+                            <span className="text-sm font-semibold text-black">
+                              {template.label}
+                            </span>
+                            {isActive ? (
+                              <span className="rounded-md bg-black px-2 py-1 text-xs font-semibold text-white">
+                                Active
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="mt-2 block text-sm leading-5 text-zinc-600">
+                            {template.description}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="h-72">
                   <DropZone
-                    key={`pos-standard-${dropZoneResetKey}`}
+                    key={`pos-process-${dropZoneResetKey}`}
                     allowedTypes={ALLOWED_TYPES}
                     buttonClassName="h-full"
                     className="h-full"
                     maxSizeMB={MAX_FILE_SIZE_MB}
                     onFileSelect={handleFileSelect}
                   />
-                )}
-              </div>
+                </div>
+              )}
             </form>
 
-            <UploadSummaryPanel
-              badgeLabel={summaryBadge}
-              formId={UPLOAD_FORM_ID}
-              summary={selectedItemSummary}
-              summaryTitle={summaryTitle}
-              disabled={isProcessDisabled}
-              label={
-                isProcessing || isAnalyzing
-                  ? mode === "template"
-                    ? "Analyzing"
-                    : "Processing"
-                  : mode === "template"
-                    ? "Analyze Mapping"
-                    : "Process"
-              }
-            />
+            {mode === "process" ? (
+              <UploadSummaryPanel
+                formId={UPLOAD_FORM_ID}
+                summary={selectedItemSummary}
+                summaryTitle={summaryTitle}
+                templateLabel={effectiveTemplateLabel}
+                disabled={isProcessDisabled}
+                label={isProcessing ? "Processing" : "Process"}
+              />
+            ) : null}
           </div>
 
           <RecentUploadPanel
             uploads={recentUploads}
             isLoading={isLoadingHistory}
-            isActionDisabled={isProcessing || isAnalyzing || deletingUploadId !== null}
+            isActionDisabled={isProcessing || deletingUploadId !== null}
             deletingUploadId={deletingUploadId}
-            height={uploadColumnHeight}
+            height={processColumnHeight}
             processingUploadId={reprocessingId}
             selectedUploadId={selectedUpload?.id ?? null}
+            templateLabels={templateLabels}
             onDelete={handleDeleteRecentUpload}
             onSelect={handleSelectRecentUpload}
           />
         </section>
-
-        {suggestions.length > 0 ? (
-          <Panel>
-            <MappingReviewTable
-              isConfirming={isProcessing}
-              onConfirm={handleConfirmMapping}
-              posColumns={posColumns}
-              suggestions={suggestions}
-            />
-          </Panel>
-        ) : null}
 
         <Panel>
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">

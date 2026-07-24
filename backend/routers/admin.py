@@ -23,7 +23,11 @@ from database import (
 )
 from services.file_reader import FileReader
 from services.file_writer import FileWriter
-from services.transformer import DataTransformer
+from services.templates import (
+    DEFAULT_TEMPLATE_KEY,
+    TEMPLATE_REGISTRY,
+    get_transformer,
+)
 
 from .upload import _optional_filename, _preview_records
 
@@ -177,8 +181,17 @@ async def reprocess_upload(upload_id: int):
             try:
                 _delete_upload_artifacts(upload, include_source=False)
                 read_result = FileReader().read(str(source_path))
-                transform_result = DataTransformer().transform(read_result["dataframe"])
-                write_result = FileWriter().write(transform_result, OUTPUT_DIR)
+                template_key = str(upload.get("template") or DEFAULT_TEMPLATE_KEY)
+                transform_result = get_transformer(template_key).transform(
+                    read_result["dataframe"]
+                )
+                template_definition = TEMPLATE_REGISTRY[template_key]
+                write_result = FileWriter().write(
+                    transform_result,
+                    OUTPUT_DIR,
+                    number_columns=template_definition["number_columns"],
+                    date_columns=template_definition["date_columns"],
+                )
             except Exception as exc:
                 detail = f"{type(exc).__name__}: {exc}"
                 update_upload(
@@ -345,6 +358,7 @@ def _admin_upload_history_item(row: dict[str, Any]) -> dict[str, Any]:
         "filename": row.get("filename") or "",
         "original_name": row["original_name"],
         "source_system": row.get("source_system") or "",
+        "template": row.get("template") or DEFAULT_TEMPLATE_KEY,
         "transaction_date": row.get("transaction_date") or "",
         "uploaded_at": row.get("uploaded_at") or "",
         "status": row.get("status") or "",

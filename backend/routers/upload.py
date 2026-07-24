@@ -20,7 +20,12 @@ from database import (
 )
 from services.file_reader import FileReader
 from services.file_writer import FileWriter
-from services.transformer import DataTransformer
+from services.templates import (
+    DEFAULT_TEMPLATE_KEY,
+    TEMPLATE_REGISTRY,
+    get_transformer,
+    public_templates,
+)
 
 
 router = APIRouter()
@@ -31,16 +36,23 @@ DOWNLOAD_MEDIA_TYPE = (
 DOWNLOAD_EXTENSIONS = {".xlsx", ".xls", ".csv"}
 
 
+@router.get("/templates")
+async def list_templates():
+    return public_templates()
+
+
 @router.post("/upload")
 async def upload_pos_file(
     request: Request,
     file: UploadFile | None = File(None),
     source_system: str = Form("Unknown"),
     transaction_date: str | None = Form(None),
+    template: str = Form(DEFAULT_TEMPLATE_KEY),
 ):
     original_filename = _original_filename(file)
     stored_filename = _stored_filename(original_filename)
     transaction_date_value = _transaction_date_value(transaction_date)
+    template_key = _template_key_value(template)
     uploader_ip = request.client.host if request.client else None
 
     try:
@@ -54,8 +66,20 @@ async def upload_pos_file(
                     "transaction_date": transaction_date_value,
                     "status": "processing",
                     "uploader_ip": uploader_ip,
+                    "template": template_key,
                 },
             )
+
+            if template_key not in TEMPLATE_REGISTRY:
+                return _validation_failure(
+                    conn,
+                    upload_id,
+                    "invalid_template",
+                    (
+                        f'Unknown template "{template_key}". Available templates: '
+                        f'{", ".join(TEMPLATE_REGISTRY)}.'
+                    ),
+                )
 
             if file is None:
                 return _validation_failure(
@@ -119,8 +143,16 @@ async def upload_pos_file(
 
             try:
                 read_result = FileReader().read(str(saved_path))
-                transform_result = DataTransformer().transform(read_result["dataframe"])
-                write_result = FileWriter().write(transform_result, OUTPUT_DIR)
+                transform_result = get_transformer(template_key).transform(
+                    read_result["dataframe"]
+                )
+                template_definition = TEMPLATE_REGISTRY[template_key]
+                write_result = FileWriter().write(
+                    transform_result,
+                    OUTPUT_DIR,
+                    number_columns=template_definition["number_columns"],
+                    date_columns=template_definition["date_columns"],
+                )
             except Exception as exc:
                 detail = f"{type(exc).__name__}: {exc}"
                 update_upload(
@@ -289,6 +321,12 @@ def _transaction_date_value(transaction_date: str | None) -> str:
     return transaction_date.strip()
 
 
+def _template_key_value(template: str | None) -> str:
+    if template is None or template.strip() == "":
+        return DEFAULT_TEMPLATE_KEY
+    return template.strip()
+
+
 def _parse_transaction_date(transaction_date: str | None) -> str | None:
     value = _transaction_date_value(transaction_date)
     try:
@@ -433,6 +471,7 @@ def _upload_history_item(row: dict[str, Any]) -> dict[str, Any]:
         "id": row["id"],
         "original_name": row["original_name"],
         "source_system": row.get("source_system") or "",
+        "template": row.get("template") or DEFAULT_TEMPLATE_KEY,
         "transaction_date": row.get("transaction_date") or "",
         "uploaded_at": row.get("uploaded_at") or "",
         "status": row.get("status") or "",

@@ -4,6 +4,7 @@ export interface RecentUploadItem {
   id: number;
   original_name: string;
   source_system: string;
+  template: string;
   transaction_date: string;
   uploaded_at: string;
   status: string;
@@ -23,6 +24,7 @@ interface RecentUploadPanelProps {
   deletingUploadId: number | null;
   processingUploadId: number | null;
   selectedUploadId: number | null;
+  templateLabels: Record<string, string>;
   onDelete: (upload: RecentUploadItem) => void;
   onSelect: (upload: RecentUploadItem) => void;
 }
@@ -55,6 +57,7 @@ export function RecentUploadPanel({
   deletingUploadId,
   processingUploadId,
   selectedUploadId,
+  templateLabels,
   onDelete,
   onSelect,
 }: RecentUploadPanelProps) {
@@ -96,7 +99,8 @@ export function RecentUploadPanel({
                     </h3>
                   </div>
                   <p className="mt-1 text-xs font-medium text-zinc-600">
-                    {formatDateTime(upload.uploaded_at)} - {upload.source_system || "Unknown"}
+                    {formatDateTime(upload.uploaded_at)} - {upload.source_system || "Unknown"} -{" "}
+                    {templateLabels[upload.template] ?? upload.template}
                   </p>
                   <p className="mt-1 text-xs text-zinc-600">
                     {formatNumber(upload.row_count)} rows - {formatNumber(upload.error_count)} errors

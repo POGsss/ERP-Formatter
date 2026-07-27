@@ -6,9 +6,44 @@ interface PreviewTableProps {
   columnSummary: ColumnSummaryItem[];
 }
 
-function displayValue(value: unknown): string {
+function formatInvoiceDate(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${String(value.getMonth() + 1).padStart(2, "0")}/${String(
+      value.getDate(),
+    ).padStart(2, "0")}/${value.getFullYear()}`;
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const text = value.trim();
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/.exec(text);
+  if (isoMatch) {
+    return `${isoMatch[2]}/${isoMatch[3]}/${isoMatch[1]}`;
+  }
+
+  const oldPosMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text);
+  if (oldPosMatch) {
+    return `${oldPosMatch[2].padStart(2, "0")}/${oldPosMatch[1].padStart(
+      2,
+      "0",
+    )}/${oldPosMatch[3]}`;
+  }
+
+  return null;
+}
+
+function displayValue(value: unknown, column: string): string {
   if (value === null || value === undefined) {
     return "";
+  }
+
+  if (column === "Invoice Date") {
+    const formattedDate = formatInvoiceDate(value);
+    if (formattedDate) {
+      return formattedDate;
+    }
   }
 
   if (typeof value === "object") {
@@ -90,7 +125,7 @@ export function PreviewTable({
                           }`}
                           title={summary?.note || summary?.source || column}
                         >
-                          {displayValue(value)}
+                          {displayValue(value, column)}
                         </td>
                       );
                     })}

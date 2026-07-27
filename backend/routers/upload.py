@@ -150,6 +150,7 @@ async def upload_pos_file(
                 write_result = FileWriter().write(
                     transform_result,
                     OUTPUT_DIR,
+                    template_name=template_key,
                     number_columns=template_definition["number_columns"],
                     date_columns=template_definition["date_columns"],
                 )

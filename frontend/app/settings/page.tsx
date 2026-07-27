@@ -14,6 +14,7 @@ import {
   TableHeaderCell,
   TextInput,
 } from "../../components/ui";
+import type { Template } from "../../types";
 
 type DefaultValueType = "string" | "int" | "float" | "date" | "formula";
 
@@ -23,6 +24,23 @@ const DEFAULT_VALUE_TYPES: DefaultValueType[] = [
   "float",
   "date",
   "formula",
+];
+const DEFAULT_TEMPLATE_KEY = "old_pos";
+const TEMPLATE_STORAGE_KEY = "erp-formatter-active-template";
+
+const FALLBACK_TEMPLATES: Template[] = [
+  {
+    key: "old_pos",
+    label: "Old POS Template",
+    description: "Processes the standard POS export into the 12-column ERP format.",
+    is_default: true,
+  },
+  {
+    key: "new_pos",
+    label: "New POS Template",
+    description: "Processes payment-method breakdown exports into per-payment ERP rows.",
+    is_default: false,
+  },
 ];
 
 interface ColumnDefault {
@@ -119,7 +137,29 @@ function displayCurrentValue(item: ColumnDefault): string {
   return currentValue(item);
 }
 
+function savedTemplateKey(templates: Template[]): string | null {
+  try {
+    const savedKey = window.localStorage.getItem(TEMPLATE_STORAGE_KEY);
+    return templates.some((template) => template.key === savedKey)
+      ? savedKey
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveTemplateKey(templateKey: string): void {
+  try {
+    window.localStorage.setItem(TEMPLATE_STORAGE_KEY, templateKey);
+  } catch {
+    // The selector still works for the current page when storage is unavailable.
+  }
+}
+
 export default function DefaultSettingsPage() {
+  const [templates, setTemplates] = useState<Template[]>(FALLBACK_TEMPLATES);
+  const [selectedTemplate, setSelectedTemplate] = useState(DEFAULT_TEMPLATE_KEY);
+  const [templatesReady, setTemplatesReady] = useState(false);
   const [defaults, setDefaults] = useState<ColumnDefault[]>([]);
   const [editingColumn, setEditingColumn] = useState<string | null>(null);
   const [draftValue, setDraftValue] = useState("");
@@ -130,14 +170,45 @@ export default function DefaultSettingsPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
+  const loadTemplates = useCallback(async () => {
+    try {
+      const response = await fetch("/api/templates", { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("Template request failed");
+      }
+
+      const payload = (await response.json()) as Template[];
+      const availableTemplates = payload.length > 0 ? payload : FALLBACK_TEMPLATES;
+      setTemplates(availableTemplates);
+      setSelectedTemplate(
+        savedTemplateKey(availableTemplates) ??
+          availableTemplates.find((template) => template.is_default)?.key ??
+          availableTemplates[0]?.key ??
+          DEFAULT_TEMPLATE_KEY,
+      );
+    } catch {
+      setTemplates(FALLBACK_TEMPLATES);
+      setSelectedTemplate(
+        savedTemplateKey(FALLBACK_TEMPLATES) ??
+          FALLBACK_TEMPLATES.find((template) => template.is_default)?.key ??
+          DEFAULT_TEMPLATE_KEY,
+      );
+    } finally {
+      setTemplatesReady(true);
+    }
+  }, []);
+
   const loadDefaults = useCallback(async () => {
     setIsLoading(true);
     setError("");
 
     try {
-      const response = await fetch("/api/admin/defaults", {
-        cache: "no-store",
-      });
+      const response = await fetch(
+        `/api/admin/defaults?template=${encodeURIComponent(selectedTemplate)}`,
+        {
+          cache: "no-store",
+        },
+      );
 
       if (!response.ok) {
         setError(await getErrorMessage(response));
@@ -151,11 +222,24 @@ export default function DefaultSettingsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [selectedTemplate]);
 
   useEffect(() => {
-    void loadDefaults();
-  }, [loadDefaults]);
+    void loadTemplates();
+  }, [loadTemplates]);
+
+  useEffect(() => {
+    if (templatesReady) {
+      void loadDefaults();
+    }
+  }, [loadDefaults, templatesReady]);
+
+  const handleTemplateChange = (templateKey: string) => {
+    cancelEdit();
+    setSelectedTemplate(templateKey);
+    saveTemplateKey(templateKey);
+    setNotice("");
+  };
 
   const startEdit = (item: ColumnDefault) => {
     setEditingColumn(item.column_name);
@@ -182,7 +266,9 @@ export default function DefaultSettingsPage() {
 
     try {
       const response = await fetch(
-        `/api/admin/defaults/${encodeURIComponent(item.column_name)}`,
+        `/api/admin/defaults/${encodeURIComponent(
+          item.column_name,
+        )}?template=${encodeURIComponent(selectedTemplate)}`,
         {
           method: "PUT",
           headers: {
@@ -214,6 +300,11 @@ export default function DefaultSettingsPage() {
     }
   };
 
+  const activeTemplate =
+    templates.find((template) => template.key === selectedTemplate) ??
+    FALLBACK_TEMPLATES[0];
+  const skeletonRowCount = selectedTemplate === "new_pos" ? 11 : 12;
+
   return (
     <AppShell title="Settings" actionHref="/" actionLabel="Back">
       {(error || notice) ? (
@@ -230,16 +321,21 @@ export default function DefaultSettingsPage() {
               ERP Default Values
             </h2>
             <p className="mt-1 text-sm text-zinc-600">
-              Configure all Sale Invoice output columns, including computed formulas.
+              Configure Sale Invoice output columns independently for {activeTemplate.label}.
             </p>
           </div>
-          <ActionButton
-            variant="secondary"
-            onClick={() => void loadDefaults()}
-            disabled={isLoading}
+          <SelectInput
+            aria-label="Template"
+            value={selectedTemplate}
+            onChange={(event) => handleTemplateChange(event.target.value)}
+            disabled={!templatesReady || isLoading || savingColumn !== null}
           >
-            {isLoading ? "Refreshing" : "Refresh"}
-          </ActionButton>
+            {templates.map((template) => (
+              <option key={template.key} value={template.key}>
+                {template.label}
+              </option>
+            ))}
+          </SelectInput>
         </div>
 
         <TableFrame fitContent>
@@ -255,7 +351,7 @@ export default function DefaultSettingsPage() {
             </thead>
             <tbody className="bg-white">
               {isLoading ? (
-                Array.from({ length: 12 }).map((_, index) => (
+                Array.from({ length: skeletonRowCount }).map((_, index) => (
                   <tr key={index}>
                     <TableCell>
                       <SkeletonLine className="h-4 w-40" />

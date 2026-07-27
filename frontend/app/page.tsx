@@ -30,6 +30,7 @@ const ALLOWED_TYPES = [".xlsx", ".xls", ".csv"];
 const PAGE_SIZE = 6;
 const DEFAULT_SOURCE_SYSTEM = "Mosaic POS";
 const DEFAULT_TEMPLATE_KEY = "old_pos";
+const TEMPLATE_STORAGE_KEY = "erp-formatter-active-template";
 const UPLOAD_FORM_ID = "erp-upload-form";
 
 const FALLBACK_TEMPLATES: Template[] = [
@@ -48,6 +49,25 @@ const FALLBACK_TEMPLATES: Template[] = [
 ];
 
 type UploadMode = "process" | "template";
+
+function savedTemplateKey(templates: Template[]): string | null {
+  try {
+    const savedKey = window.localStorage.getItem(TEMPLATE_STORAGE_KEY);
+    return templates.some((template) => template.key === savedKey)
+      ? savedKey
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveTemplateKey(templateKey: string): void {
+  try {
+    window.localStorage.setItem(TEMPLATE_STORAGE_KEY, templateKey);
+  } catch {
+    // Template selection still persists in page state when storage is unavailable.
+  }
+}
 
 interface AdminStats {
   uploads_today: number;
@@ -202,14 +222,16 @@ export default function HomePage() {
       const availableTemplates = payload.length > 0 ? payload : FALLBACK_TEMPLATES;
       setTemplates(availableTemplates);
       setSelectedTemplate(
-        availableTemplates.find((template) => template.is_default)?.key ??
+        savedTemplateKey(availableTemplates) ??
+          availableTemplates.find((template) => template.is_default)?.key ??
           availableTemplates[0]?.key ??
           DEFAULT_TEMPLATE_KEY,
       );
     } catch {
       setTemplates(FALLBACK_TEMPLATES);
       setSelectedTemplate(
-        FALLBACK_TEMPLATES.find((template) => template.is_default)?.key ??
+        savedTemplateKey(FALLBACK_TEMPLATES) ??
+          FALLBACK_TEMPLATES.find((template) => template.is_default)?.key ??
           DEFAULT_TEMPLATE_KEY,
       );
     }
@@ -280,6 +302,11 @@ export default function HomePage() {
     setSelectedUpload(null);
     setError("");
     setNotice("");
+  };
+
+  const handleTemplateSelect = (templateKey: string) => {
+    setSelectedTemplate(templateKey);
+    saveTemplateKey(templateKey);
   };
 
   const handleFileSelect = (selectedFile: File) => {
@@ -549,12 +576,6 @@ export default function HomePage() {
 
               {mode === "template" ? (
                 <div className="flex min-h-0 flex-1 flex-col">
-                  <div className="mb-4">
-                    <h2 className="text-base font-semibold text-black">Choose a template</h2>
-                    <p className="mt-1 text-sm text-zinc-600">
-                      Select the output format used on the Process tab.
-                    </p>
-                  </div>
                   <div role="radiogroup" aria-label="Templates" className="grid gap-3">
                     {templates.map((template) => {
                       const isActive = template.key === selectedTemplate;
@@ -564,7 +585,7 @@ export default function HomePage() {
                           type="button"
                           role="radio"
                           aria-checked={isActive}
-                          onClick={() => setSelectedTemplate(template.key)}
+                          onClick={() => handleTemplateSelect(template.key)}
                           className={`w-full rounded-lg border p-4 text-left transition ${
                             isActive
                               ? "border-black bg-zinc-50 ring-1 ring-black"

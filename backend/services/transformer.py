@@ -432,7 +432,7 @@ def _load_column_defaults() -> dict[str, ColumnDefaultConfig]:
         from database import get_column_defaults, get_db
 
         with closing(get_db()) as conn:
-            rows = get_column_defaults(conn)
+            rows = get_column_defaults(conn, "old_pos")
     except Exception:
         return defaults
 

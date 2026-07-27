@@ -189,6 +189,7 @@ async def reprocess_upload(upload_id: int):
                 write_result = FileWriter().write(
                     transform_result,
                     OUTPUT_DIR,
+                    template_name=template_key,
                     number_columns=template_definition["number_columns"],
                     date_columns=template_definition["date_columns"],
                 )
@@ -264,10 +265,19 @@ async def reprocess_upload(upload_id: int):
 
 
 @router.get("/defaults")
-async def list_defaults():
+async def list_defaults(template: str = Query(DEFAULT_TEMPLATE_KEY)):
+    if template not in TEMPLATE_REGISTRY:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "invalid_template",
+                "detail": f'Unknown template "{template}".',
+            },
+        )
+
     try:
         with closing(get_db()) as conn:
-            defaults = get_column_defaults(conn)
+            defaults = get_column_defaults(conn, template)
     except Exception as exc:
         return _server_error(exc)
 
@@ -275,10 +285,23 @@ async def list_defaults():
 
 
 @router.put("/defaults/{column}")
-async def update_default(column: str, request: DefaultUpdateRequest):
+async def update_default(
+    column: str,
+    request: DefaultUpdateRequest,
+    template: str = Query(DEFAULT_TEMPLATE_KEY),
+):
+    if template not in TEMPLATE_REGISTRY:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "invalid_template",
+                "detail": f'Unknown template "{template}".',
+            },
+        )
+
     try:
         with closing(get_db()) as conn:
-            existing = get_column_default(conn, column)
+            existing = get_column_default(conn, column, template)
             if existing is None:
                 return JSONResponse(
                     status_code=404,
@@ -308,6 +331,7 @@ async def update_default(column: str, request: DefaultUpdateRequest):
                 column,
                 normalized_value,
                 normalized_value_type,
+                template,
             )
     except ValueError as exc:
         return JSONResponse(

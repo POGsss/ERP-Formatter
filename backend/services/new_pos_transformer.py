@@ -1,3 +1,4 @@
+from contextlib import closing
 from datetime import date, datetime
 from math import isfinite
 from pathlib import Path
@@ -6,12 +7,27 @@ from typing import Any
 import pandas as pd
 
 try:
-    from .transformer import TransformResult
+    from .transformer import (
+        ColumnDefaultConfig,
+        TransformResult,
+        _coerce_default_value,
+        _normalize_value_type,
+    )
 except ImportError:
     try:
-        from services.transformer import TransformResult
+        from services.transformer import (
+            ColumnDefaultConfig,
+            TransformResult,
+            _coerce_default_value,
+            _normalize_value_type,
+        )
     except ModuleNotFoundError:
-        from transformer import TransformResult
+        from transformer import (
+            ColumnDefaultConfig,
+            TransformResult,
+            _coerce_default_value,
+            _normalize_value_type,
+        )
 
 
 OUTPUT_COLUMNS = [
@@ -47,6 +63,12 @@ PAYMENT_METHOD_MAPPING = {
     "Other( FoodPanda )": {"customer_code": 70, "letter": "F"},
     "Other( GrabFood )": {"customer_code": 71, "letter": "G"},
     "Other( Pickup Coffee App )": {"customer_code": 69, "letter": "B"},
+}
+
+MAYA_QR_PAYMENT_METHODS = {
+    "card(debit)",
+    "card(master)",
+    "other(e-wallet)",
 }
 
 _NORMALIZED_PAYMENT_METHOD_MAPPING = {
@@ -112,11 +134,85 @@ COLUMN_SUMMARY = [
     },
 ]
 
+FALLBACK_COLUMN_DEFAULTS = {
+    "SI Number": {
+        "default_value": "(generated from date/payment)",
+        "value_type": "formula",
+        "description": "RR1 + payment-method letter + Business Date MMDD.",
+    },
+    "Invoice Date": {
+        "default_value": "(from Business Date)",
+        "value_type": "date",
+        "description": "Business Date converted from DD/MM/YYYY to MM/DD/YYYY output.",
+    },
+    "Product Code": {
+        "default_value": "001",
+        "value_type": "string",
+        "description": "ERP product code for New POS rows.",
+    },
+    "Quantity": {
+        "default_value": "0",
+        "value_type": "int",
+        "description": "Quantity written for each payment row.",
+    },
+    "Amount": {
+        "default_value": "(from Gross Sale w/o VAT)",
+        "value_type": "formula",
+        "description": "Gross Sale w/o VAT; MAYA QR methods are totalled.",
+    },
+    "Sales Discount": {
+        "default_value": "(from Discount Amount)",
+        "value_type": "formula",
+        "description": "Discount Amount; MAYA QR methods are totalled.",
+    },
+    "VAT Payable": {
+        "default_value": "(from VAT Amount)",
+        "value_type": "formula",
+        "description": "VAT Amount; MAYA QR methods are totalled.",
+    },
+    "Customer Code": {
+        "default_value": "(from Payment Method)",
+        "value_type": "formula",
+        "description": "Customer code selected from the payment-method mapping.",
+    },
+    "Doc Class": {
+        "default_value": "RR1",
+        "value_type": "string",
+        "description": "ERP document class for New POS rows.",
+    },
+    "Currency Code": {
+        "default_value": "PHP",
+        "value_type": "string",
+        "description": "Currency code for New POS rows.",
+    },
+    "Remarks": {
+        "default_value": "",
+        "value_type": "string",
+        "description": "Remarks written for New POS rows.",
+    },
+}
+
+NATIVE_FORMULA_COLUMNS = {
+    "SI Number",
+    "Amount",
+    "Sales Discount",
+    "VAT Payable",
+    "Customer Code",
+}
+CONSTANT_COLUMNS = {
+    "Product Code",
+    "Quantity",
+    "Doc Class",
+    "Currency Code",
+    "Remarks",
+}
+
 
 class NewPosTransformer:
     """Transform a New POS payment breakdown into per-payment ERP rows."""
 
     def transform(self, input_df: pd.DataFrame) -> TransformResult:
+        defaults = _load_column_defaults()
         source_columns = _source_column_lookup(input_df)
         business_dates = _fill_down(
             _source_series(input_df, source_columns, "Business Date")
@@ -128,7 +224,8 @@ class NewPosTransformer:
             "Payment Method",
         )
 
-        records: list[dict[str, Any]] = []
+        native_records: list[dict[str, Any]] = []
+        maya_record_indexes: dict[date, int] = {}
         warnings: list[str] = []
         errors: list[str] = []
 
@@ -184,27 +281,46 @@ class NewPosTransformer:
                 warnings,
             )
 
-            records.append(
-                {
-                    "SI Number": (
-                        f"RR1{customer_letter}{business_date.strftime('%m%d')}"
-                    ),
-                    "Invoice Date": business_date,
-                    "Product Code": "001",
-                    "Quantity": 0,
-                    "Amount": amount,
-                    "Sales Discount": sales_discount,
-                    "VAT Payable": vat_payable,
-                    "Customer Code": customer_code,
-                    "Doc Class": "RR1",
-                    "Currency Code": "PHP",
-                    "Remarks": "",
-                }
-            )
+            native_record = {
+                "SI Number": (
+                    f"RR1{customer_letter}{business_date.strftime('%m%d')}"
+                ),
+                "Invoice Date": business_date,
+                "Product Code": "001",
+                "Quantity": 0,
+                "Amount": amount,
+                "Sales Discount": sales_discount,
+                "VAT Payable": vat_payable,
+                "Customer Code": customer_code,
+                "Doc Class": "RR1",
+                "Currency Code": "PHP",
+                "Remarks": "",
+            }
+
+            if _normalize_payment_method(payment_method) in MAYA_QR_PAYMENT_METHODS:
+                maya_key = business_date.date()
+                existing_index = maya_record_indexes.get(maya_key)
+                if existing_index is None:
+                    maya_record_indexes[maya_key] = len(native_records)
+                    native_records.append(native_record)
+                else:
+                    existing_record = native_records[existing_index]
+                    for column in ("Amount", "Sales Discount", "VAT Payable"):
+                        existing_record[column] = round(
+                            float(existing_record[column])
+                            + float(native_record[column]),
+                            2,
+                        )
+                continue
+
+            native_records.append(native_record)
+
+        records = [
+            _apply_column_defaults(native_record, defaults)
+            for native_record in native_records
+        ]
 
         output_df = pd.DataFrame(records, columns=OUTPUT_COLUMNS)
-        if not output_df.empty:
-            output_df["Invoice Date"] = pd.to_datetime(output_df["Invoice Date"])
 
         return TransformResult(
             output_df=output_df,
@@ -212,8 +328,108 @@ class NewPosTransformer:
             error_count=len(errors),
             warnings=warnings,
             errors=errors,
-            column_summary=[dict(item) for item in COLUMN_SUMMARY],
+            column_summary=_build_column_summary(defaults),
         )
+
+
+def _load_column_defaults() -> dict[str, ColumnDefaultConfig]:
+    defaults = _fallback_defaults()
+
+    try:
+        from database import get_column_defaults, get_db
+
+        with closing(get_db()) as conn:
+            rows = get_column_defaults(conn, "new_pos")
+    except Exception:
+        return defaults
+
+    for row in rows:
+        column_name = str(row.get("column_name") or "")
+        if column_name not in defaults:
+            continue
+
+        fallback = FALLBACK_COLUMN_DEFAULTS[column_name]
+        defaults[column_name] = ColumnDefaultConfig(
+            column_name=column_name,
+            default_value=str(row.get("default_value") or ""),
+            value_type=_normalize_value_type(
+                row.get("value_type"),
+                str(fallback["value_type"]),
+            ),
+            description=str(row.get("description") or fallback["description"]),
+        )
+
+    return defaults
+
+
+def _fallback_defaults() -> dict[str, ColumnDefaultConfig]:
+    return {
+        column_name: ColumnDefaultConfig(
+            column_name=column_name,
+            default_value=str(item["default_value"]),
+            value_type=str(item["value_type"]),
+            description=str(item["description"]),
+        )
+        for column_name, item in FALLBACK_COLUMN_DEFAULTS.items()
+    }
+
+
+def _apply_column_defaults(
+    native_record: dict[str, Any],
+    defaults: dict[str, ColumnDefaultConfig],
+) -> dict[str, Any]:
+    output_record: dict[str, Any] = {}
+    for column in OUTPUT_COLUMNS:
+        config = defaults[column]
+        if _uses_native_logic(column, config):
+            output_record[column] = native_record[column]
+            continue
+
+        output_record[column] = _coerce_default_value(
+            config.default_value,
+            config.value_type,
+            FALLBACK_COLUMN_DEFAULTS[column]["default_value"],
+        )
+    return output_record
+
+
+def _uses_native_logic(column: str, config: ColumnDefaultConfig) -> bool:
+    if column in NATIVE_FORMULA_COLUMNS:
+        return config.value_type == "formula"
+    if column == "Invoice Date":
+        return (
+            config.value_type == "formula"
+            or config.default_value == "(from Business Date)"
+        )
+    return False
+
+
+def _build_column_summary(
+    defaults: dict[str, ColumnDefaultConfig],
+) -> list[dict[str, Any]]:
+    native_summary = {item["column"]: item for item in COLUMN_SUMMARY}
+    summary: list[dict[str, Any]] = []
+
+    for column in OUTPUT_COLUMNS:
+        config = defaults[column]
+        if _uses_native_logic(column, config):
+            item = dict(native_summary[column])
+            item["value_type"] = config.value_type
+            item["description"] = config.description
+            summary.append(item)
+            continue
+
+        summary.append(
+            {
+                "column": column,
+                "source": f"Template setting -> {config.default_value}",
+                "status": "hardcoded" if column in CONSTANT_COLUMNS else "defaulted",
+                "value_type": config.value_type,
+                "description": config.description,
+            }
+        )
+
+    return summary
 
 
 def _source_column_lookup(input_df: pd.DataFrame) -> dict[str, Any]:
@@ -325,7 +541,7 @@ def _parse_business_date(value: Any) -> datetime | None:
 
     text_value = str(value).strip()
     try:
-        return datetime.strptime(text_value, "%m/%d/%Y")
+        return datetime.strptime(text_value, "%d/%m/%Y")
     except (TypeError, ValueError):
         return None
 

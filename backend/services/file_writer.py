@@ -2,6 +2,7 @@ from collections.abc import Collection
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pandas as pd
 from openpyxl import Workbook
@@ -16,6 +17,11 @@ except ImportError:
 
 
 MAIN_SHEET_NAME = "ERP Import"
+DATE_NUMBER_FORMAT = "mm/dd/yyyy"
+TEMPLATE_OUTPUT_PREFIXES = {
+    "old_pos": "OldTemplateOutput",
+    "new_pos": "NewTemplateOutput",
+}
 
 NUMBER_COLUMNS = {
     "Quantity",
@@ -44,13 +50,14 @@ class FileWriter:
           "summary_path": str | None
         }
         """
-        del template_name
-
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%S%M%H")
-        output_filename = f"output_{timestamp}.xlsx"
+        output_filename = _output_filename(
+            template_name,
+            timestamp,
+        )
         full_output_path = output_path / output_filename
 
         workbook = Workbook()
@@ -95,7 +102,7 @@ class FileWriter:
         for row_index, row in enumerate(dataframe.itertuples(index=False), start=2):
             for column_index, value in enumerate(row, start=1):
                 column_name = str(dataframe.columns[column_index - 1])
-                sheet.cell(
+                cell = sheet.cell(
                     row=row_index,
                     column=column_index,
                     value=_excel_value(
@@ -105,6 +112,11 @@ class FileWriter:
                         date_columns=resolved_date_columns,
                     ),
                 )
+                if (
+                    column_name in resolved_date_columns
+                    and isinstance(cell.value, date | datetime)
+                ):
+                    cell.number_format = DATE_NUMBER_FORMAT
 
 
     def _write_error_report(self, errors: list[Any], output_path: Path) -> None:
@@ -153,6 +165,16 @@ def _excel_value(
     if _is_missing(value):
         return ""
     return value
+
+
+def _output_filename(
+    template_name: str,
+    fallback_identifier: str,
+) -> str:
+    prefix = TEMPLATE_OUTPUT_PREFIXES.get(template_name)
+    if prefix is None:
+        return f"output_{fallback_identifier}.xlsx"
+    return f"{prefix}_{uuid4().hex[:6]}.xlsx"
 
 
 def _excel_number_value(value: Any) -> int | float | str:

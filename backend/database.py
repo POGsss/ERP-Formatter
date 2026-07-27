@@ -105,9 +105,87 @@ SEEDED_COLUMN_DEFAULTS = [
     },
 ]
 
+NEW_POS_SEEDED_COLUMN_DEFAULTS = [
+    {
+        "column_name": "SI Number",
+        "default_value": "(generated from date/payment)",
+        "value_type": "formula",
+        "description": "RR1 + payment-method letter + Business Date MMDD.",
+    },
+    {
+        "column_name": "Invoice Date",
+        "default_value": "(from Business Date)",
+        "value_type": "date",
+        "description": "Business Date converted from DD/MM/YYYY to MM/DD/YYYY output.",
+    },
+    {
+        "column_name": "Product Code",
+        "default_value": "001",
+        "value_type": "string",
+        "description": "ERP product code for New POS rows.",
+    },
+    {
+        "column_name": "Quantity",
+        "default_value": "0",
+        "value_type": "int",
+        "description": "Quantity written for each payment row.",
+    },
+    {
+        "column_name": "Amount",
+        "default_value": "(from Gross Sale w/o VAT)",
+        "value_type": "formula",
+        "description": "Gross Sale w/o VAT; MAYA QR methods are totalled.",
+    },
+    {
+        "column_name": "Sales Discount",
+        "default_value": "(from Discount Amount)",
+        "value_type": "formula",
+        "description": "Discount Amount; MAYA QR methods are totalled.",
+    },
+    {
+        "column_name": "VAT Payable",
+        "default_value": "(from VAT Amount)",
+        "value_type": "formula",
+        "description": "VAT Amount; MAYA QR methods are totalled.",
+    },
+    {
+        "column_name": "Customer Code",
+        "default_value": "(from Payment Method)",
+        "value_type": "formula",
+        "description": "Customer code selected from the payment-method mapping.",
+    },
+    {
+        "column_name": "Doc Class",
+        "default_value": "RR1",
+        "value_type": "string",
+        "description": "ERP document class for New POS rows.",
+    },
+    {
+        "column_name": "Currency Code",
+        "default_value": "PHP",
+        "value_type": "string",
+        "description": "Currency code for New POS rows.",
+    },
+    {
+        "column_name": "Remarks",
+        "default_value": "",
+        "value_type": "string",
+        "description": "Remarks written for New POS rows.",
+    },
+]
+
+TEMPLATE_COLUMN_DEFAULTS = {
+    "old_pos": SEEDED_COLUMN_DEFAULTS,
+    "new_pos": NEW_POS_SEEDED_COLUMN_DEFAULTS,
+}
+
 SEEDED_COLUMN_NAMES = [item["column_name"] for item in SEEDED_COLUMN_DEFAULTS]
 SEEDED_COLUMN_BY_NAME = {
     item["column_name"]: item for item in SEEDED_COLUMN_DEFAULTS
+}
+TEMPLATE_COLUMN_BY_NAME = {
+    template: {item["column_name"]: item for item in items}
+    for template, items in TEMPLATE_COLUMN_DEFAULTS.items()
 }
 
 
@@ -175,6 +253,40 @@ def init_db() -> None:
             """
         )
         _seed_column_defaults(connection)
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS template_column_defaults (
+                template TEXT NOT NULL,
+                column_name TEXT NOT NULL,
+                default_value TEXT NOT NULL,
+                value_type TEXT NOT NULL,
+                description TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (template, column_name)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO template_column_defaults (
+                template,
+                column_name,
+                default_value,
+                value_type,
+                description,
+                updated_at
+            )
+            SELECT
+                'old_pos',
+                column_name,
+                default_value,
+                value_type,
+                description,
+                updated_at
+            FROM column_defaults
+            """
+        )
+        _seed_template_column_defaults(connection)
         connection.commit()
 
 
@@ -267,54 +379,61 @@ def count_uploads(conn: sqlite3.Connection) -> int:
     return int(row["total"])
 
 
-def get_column_defaults(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    placeholders = ", ".join("?" for _ in SEEDED_COLUMN_NAMES)
+def get_column_defaults(
+    conn: sqlite3.Connection,
+    template: str = "old_pos",
+) -> list[dict[str, Any]]:
+    seeds = _template_default_seeds(template)
+    column_names = [item["column_name"] for item in seeds]
+    placeholders = ", ".join("?" for _ in column_names)
     rows = conn.execute(
         f"""
-        SELECT column_name, default_value, value_type, description, updated_at
-        FROM column_defaults
-        WHERE column_name IN ({placeholders})
-        ORDER BY
-            CASE column_name
-                WHEN 'SI Number' THEN 1
-                WHEN 'Invoice Date' THEN 2
-                WHEN 'Product Code' THEN 3
-                WHEN 'Quantity' THEN 4
-                WHEN 'Unit Price' THEN 5
-                WHEN 'Amount' THEN 6
-                WHEN 'Term Amount' THEN 7
-                WHEN 'Term Code' THEN 8
-                WHEN 'Customer Code' THEN 9
-                WHEN 'Doc Class' THEN 10
-                WHEN 'Currency Code' THEN 11
-                WHEN 'Remarks' THEN 12
-                ELSE 99
-            END,
-            column_name
+        SELECT
+            template,
+            column_name,
+            default_value,
+            value_type,
+            description,
+            updated_at
+        FROM template_column_defaults
+        WHERE template = ? AND column_name IN ({placeholders})
         """,
-        SEEDED_COLUMN_NAMES,
+        (template, *column_names),
     ).fetchall()
-    return [_with_seed_description(dict(row)) for row in rows]
+    rows_by_name = {row["column_name"]: dict(row) for row in rows}
+    return [
+        _with_template_seed_description(rows_by_name[column_name], template)
+        for column_name in column_names
+        if column_name in rows_by_name
+    ]
 
 
 def get_column_default(
     conn: sqlite3.Connection,
     column_name: str,
+    template: str = "old_pos",
 ) -> dict[str, Any] | None:
+    seeds_by_name = _template_default_seeds_by_name(template)
     row = conn.execute(
         """
-        SELECT column_name, default_value, value_type, description, updated_at
-        FROM column_defaults
-        WHERE column_name = ?
+        SELECT
+            template,
+            column_name,
+            default_value,
+            value_type,
+            description,
+            updated_at
+        FROM template_column_defaults
+        WHERE template = ? AND column_name = ?
         """,
-        (column_name,),
+        (template, column_name),
     ).fetchone()
     row_dict = _row_to_dict(row)
     if row_dict is None:
         return None
-    if row_dict["column_name"] not in SEEDED_COLUMN_BY_NAME:
+    if row_dict["column_name"] not in seeds_by_name:
         return None
-    return _with_seed_description(row_dict)
+    return _with_template_seed_description(row_dict, template)
 
 
 def update_column_default(
@@ -322,19 +441,21 @@ def update_column_default(
     column_name: str,
     default_value: str,
     value_type: str,
+    template: str = "old_pos",
 ) -> dict[str, Any] | None:
+    _template_default_seeds_by_name(template)
     conn.execute(
         """
-        UPDATE column_defaults
+        UPDATE template_column_defaults
         SET default_value = ?,
             value_type = ?,
             updated_at = CURRENT_TIMESTAMP
-        WHERE column_name = ?
+        WHERE template = ? AND column_name = ?
         """,
-        (default_value, value_type, column_name),
+        (default_value, value_type, template, column_name),
     )
     conn.commit()
-    return get_column_default(conn, column_name)
+    return get_column_default(conn, column_name, template)
 
 
 def _validate_columns(data: dict[str, Any], allowed_columns: set[str]) -> None:
@@ -367,6 +488,37 @@ def _with_seed_description(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _with_template_seed_description(
+    row: dict[str, Any],
+    template: str,
+) -> dict[str, Any]:
+    seed = _template_default_seeds_by_name(template).get(
+        str(row.get("column_name") or "")
+    )
+    if seed is None:
+        return row
+
+    row["description"] = seed["description"]
+    row["value"] = row.get("default_value")
+    return row
+
+
+def _template_default_seeds(template: str) -> list[dict[str, str]]:
+    try:
+        return TEMPLATE_COLUMN_DEFAULTS[template]
+    except KeyError as exc:
+        raise ValueError(f'Unknown template "{template}".') from exc
+
+
+def _template_default_seeds_by_name(
+    template: str,
+) -> dict[str, dict[str, str]]:
+    try:
+        return TEMPLATE_COLUMN_BY_NAME[template]
+    except KeyError as exc:
+        raise ValueError(f'Unknown template "{template}".') from exc
+
+
 def _seed_column_defaults(conn: sqlite3.Connection) -> None:
     for item in SEEDED_COLUMN_DEFAULTS:
         conn.execute(
@@ -395,6 +547,38 @@ def _seed_column_defaults(conn: sqlite3.Connection) -> None:
             """,
             (item["description"], item["column_name"]),
         )
+
+
+def _seed_template_column_defaults(conn: sqlite3.Connection) -> None:
+    for template, items in TEMPLATE_COLUMN_DEFAULTS.items():
+        for item in items:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO template_column_defaults (
+                    template,
+                    column_name,
+                    default_value,
+                    value_type,
+                    description
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    template,
+                    item["column_name"],
+                    item["default_value"],
+                    item["value_type"],
+                    item["description"],
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE template_column_defaults
+                SET description = ?
+                WHERE template = ? AND column_name = ?
+                """,
+                (item["description"], template, item["column_name"]),
+            )
 
 
 def _upgrade_legacy_seed_default(

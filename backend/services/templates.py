@@ -38,7 +38,6 @@ TEMPLATE_REGISTRY: dict[str, dict[str, Any]] = {
             "Sales Discount",
             "VAT Payable",
             "Quantity",
-            "Product Code",
         },
         "date_columns": {"Invoice Date"},
     },

@@ -120,7 +120,7 @@ NEW_POS_SEEDED_COLUMN_DEFAULTS = [
     },
     {
         "column_name": "Product Code",
-        "default_value": "001",
+        "default_value": "0001",
         "value_type": "string",
         "description": "ERP product code for New POS rows.",
     },
@@ -152,7 +152,7 @@ NEW_POS_SEEDED_COLUMN_DEFAULTS = [
         "column_name": "Customer Code",
         "default_value": "(from Payment Method)",
         "value_type": "formula",
-        "description": "Customer code selected from the payment-method mapping.",
+        "description": "Four-character text code selected from the payment-method mapping.",
     },
     {
         "column_name": "Doc Class",
@@ -579,6 +579,18 @@ def _seed_template_column_defaults(conn: sqlite3.Connection) -> None:
                 """,
                 (item["description"], template, item["column_name"]),
             )
+
+    conn.execute(
+        """
+        UPDATE template_column_defaults
+        SET default_value = '0001',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE template = 'new_pos'
+          AND column_name = 'Product Code'
+          AND default_value = '001'
+          AND value_type = 'string'
+        """
+    )
 
 
 def _upgrade_legacy_seed_default(

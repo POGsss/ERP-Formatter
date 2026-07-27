@@ -56,13 +56,13 @@ INPUT_COLUMNS = [
 ]
 
 PAYMENT_METHOD_MAPPING = {
-    "Card(DEBIT)": {"customer_code": 72, "letter": "M"},
-    "Card(MASTER)": {"customer_code": 72, "letter": "M"},
-    "cash": {"customer_code": 68, "letter": "C"},
-    "Other( E-Wallet )": {"customer_code": 72, "letter": "M"},
-    "Other( FoodPanda )": {"customer_code": 70, "letter": "F"},
-    "Other( GrabFood )": {"customer_code": 71, "letter": "G"},
-    "Other( Pickup Coffee App )": {"customer_code": 69, "letter": "B"},
+    "Card(DEBIT)": {"customer_code": "0072", "letter": "M"},
+    "Card(MASTER)": {"customer_code": "0072", "letter": "M"},
+    "cash": {"customer_code": "0068", "letter": "C"},
+    "Other( E-Wallet )": {"customer_code": "0072", "letter": "M"},
+    "Other( FoodPanda )": {"customer_code": "0070", "letter": "F"},
+    "Other( GrabFood )": {"customer_code": "0071", "letter": "G"},
+    "Other( Pickup Coffee App )": {"customer_code": "0069", "letter": "B"},
 }
 
 MAYA_QR_PAYMENT_METHODS = {
@@ -89,7 +89,7 @@ COLUMN_SUMMARY = [
     },
     {
         "column": "Product Code",
-        "source": "001",
+        "source": "0001",
         "status": "hardcoded",
     },
     {
@@ -146,7 +146,7 @@ FALLBACK_COLUMN_DEFAULTS = {
         "description": "Business Date converted from DD/MM/YYYY to MM/DD/YYYY output.",
     },
     "Product Code": {
-        "default_value": "001",
+        "default_value": "0001",
         "value_type": "string",
         "description": "ERP product code for New POS rows.",
     },
@@ -173,7 +173,7 @@ FALLBACK_COLUMN_DEFAULTS = {
     "Customer Code": {
         "default_value": "(from Payment Method)",
         "value_type": "formula",
-        "description": "Customer code selected from the payment-method mapping.",
+        "description": "Four-character text code selected from the payment-method mapping.",
     },
     "Doc Class": {
         "default_value": "RR1",
@@ -248,12 +248,12 @@ class NewPosTransformer:
 
             payment_details = _payment_method_details(payment_method)
             if payment_details is None:
-                customer_code = 0
+                customer_code = "0000"
                 customer_letter = "X"
                 warnings.append(
                     f"Row {row_position}: Payment Method "
                     f"{str(payment_method).strip()!r} is unknown; "
-                    "used Customer Code 0 and letter X"
+                    "used Customer Code 0000 and letter X"
                 )
             else:
                 customer_code = payment_details["customer_code"]
@@ -286,7 +286,7 @@ class NewPosTransformer:
                     f"RR1{customer_letter}{business_date.strftime('%m%d')}"
                 ),
                 "Invoice Date": business_date,
-                "Product Code": "001",
+                "Product Code": "0001",
                 "Quantity": 0,
                 "Amount": amount,
                 "Sales Discount": sales_discount,

@@ -5,7 +5,6 @@ import { Pencil, X } from "lucide-react";
 import {
   ActionButton,
   AppShell,
-  Message,
   Panel,
   SelectInput,
   SkeletonLine,
@@ -58,19 +57,6 @@ interface DefaultsResponse {
 
 interface DefaultUpdateResponse {
   default: ColumnDefault;
-}
-
-async function getErrorMessage(response: Response): Promise<string> {
-  try {
-    const payload = (await response.json()) as {
-      detail?: string;
-      error?: string;
-    };
-
-    return payload.detail || payload.error || "Request failed.";
-  } catch {
-    return "Request failed.";
-  }
 }
 
 function inputType(valueType: DefaultValueType): "number" | "text" | "date" {
@@ -167,8 +153,6 @@ export default function DefaultSettingsPage() {
     useState<DefaultValueType>("string");
   const [isLoading, setIsLoading] = useState(true);
   const [savingColumn, setSavingColumn] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
   const loadTemplates = useCallback(async () => {
     try {
@@ -200,7 +184,6 @@ export default function DefaultSettingsPage() {
 
   const loadDefaults = useCallback(async () => {
     setIsLoading(true);
-    setError("");
 
     try {
       const response = await fetch(
@@ -211,14 +194,13 @@ export default function DefaultSettingsPage() {
       );
 
       if (!response.ok) {
-        setError(await getErrorMessage(response));
         return;
       }
 
       const payload = (await response.json()) as DefaultsResponse;
       setDefaults(payload.defaults ?? []);
     } catch {
-      setError("Defaults failed to load. Check that the backend server is running.");
+      return;
     } finally {
       setIsLoading(false);
     }
@@ -238,15 +220,12 @@ export default function DefaultSettingsPage() {
     cancelEdit();
     setSelectedTemplate(templateKey);
     saveTemplateKey(templateKey);
-    setNotice("");
   };
 
   const startEdit = (item: ColumnDefault) => {
     setEditingColumn(item.column_name);
     setDraftValue(currentValue(item));
     setDraftValueType(item.value_type);
-    setError("");
-    setNotice("");
   };
 
   const cancelEdit = () => {
@@ -261,8 +240,6 @@ export default function DefaultSettingsPage() {
     }
 
     setSavingColumn(item.column_name);
-    setError("");
-    setNotice("");
 
     try {
       const response = await fetch(
@@ -282,7 +259,6 @@ export default function DefaultSettingsPage() {
       );
 
       if (!response.ok) {
-        setError(await getErrorMessage(response));
         return;
       }
 
@@ -291,10 +267,9 @@ export default function DefaultSettingsPage() {
       setEditingColumn(null);
       setDraftValue("");
       setDraftValueType("string");
-      setNotice(`${item.column_name} default saved.`);
       await loadDefaults();
     } catch {
-      setError("Default save failed. Check that the backend server is running.");
+      return;
     } finally {
       setSavingColumn(null);
     }
@@ -307,13 +282,6 @@ export default function DefaultSettingsPage() {
 
   return (
     <AppShell title="Settings" actionHref="/" actionLabel="Back">
-      {(error || notice) ? (
-        <section className="grid gap-3">
-          {error ? <Message tone="error">{error}</Message> : null}
-          {notice ? <Message tone="success">{notice}</Message> : null}
-        </section>
-      ) : null}
-
       <Panel>
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div>

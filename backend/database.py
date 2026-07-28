@@ -110,7 +110,7 @@ NEW_POS_SEEDED_COLUMN_DEFAULTS = [
         "column_name": "SI Number",
         "default_value": "(generated from date/payment)",
         "value_type": "formula",
-        "description": "RR1 + payment-method letter + Business Date MMDD.",
+        "description": "Store Doc Class + payment-method letter + Business Date MMDD.",
     },
     {
         "column_name": "Invoice Date",
@@ -156,9 +156,9 @@ NEW_POS_SEEDED_COLUMN_DEFAULTS = [
     },
     {
         "column_name": "Doc Class",
-        "default_value": "RR1",
-        "value_type": "string",
-        "description": "ERP document class for New POS rows.",
+        "default_value": "(from Store)",
+        "value_type": "formula",
+        "description": "ERP document class derived from the Store branch and location.",
     },
     {
         "column_name": "Currency Code",
@@ -588,6 +588,19 @@ def _seed_template_column_defaults(conn: sqlite3.Connection) -> None:
         WHERE template = 'new_pos'
           AND column_name = 'Product Code'
           AND default_value = '001'
+          AND value_type = 'string'
+        """
+    )
+
+    conn.execute(
+        """
+        UPDATE template_column_defaults
+        SET default_value = '(from Store)',
+            value_type = 'formula',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE template = 'new_pos'
+          AND column_name = 'Doc Class'
+          AND default_value = 'RR1'
           AND value_type = 'string'
         """
     )

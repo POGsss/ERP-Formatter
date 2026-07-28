@@ -56,19 +56,30 @@ INPUT_COLUMNS = [
 ]
 
 PAYMENT_METHOD_MAPPING = {
-    "Card(DEBIT)": {"customer_code": "0072", "letter": "M"},
-    "Card(MASTER)": {"customer_code": "0072", "letter": "M"},
     "cash": {"customer_code": "0068", "letter": "C"},
-    "Other( E-Wallet )": {"customer_code": "0072", "letter": "M"},
     "Other( FoodPanda )": {"customer_code": "0070", "letter": "F"},
     "Other( GrabFood )": {"customer_code": "0071", "letter": "G"},
     "Other( Pickup Coffee App )": {"customer_code": "0069", "letter": "B"},
 }
 
-MAYA_QR_PAYMENT_METHODS = {
-    "card(debit)",
-    "card(master)",
-    "other(e-wallet)",
+MAYA_QR_DETAILS = {"customer_code": "0072", "letter": "M"}
+
+STORE_DOCUMENT_CLASS_MAPPING = {
+    "UNIOIL BF RESORT LAS PINAS": "LL2",
+    "UNIOIL DIVERSION ROAD TAYTAY": "RR1",
+    "UNIOIL SLEX MAKATI": "MM1",
+    # Additional names visible in the ERP branch/location reference.
+    "UNIOIL TAYTAY RIZAL": "RR1",
+    "ETON CENTRIS QC": "QQ1",
+    "UNIOIL AMANG RODRIGUEZ": "PP1",
+    "SLEX MAKATI": "MM1",
+    "BF RESORT DRIVE": "LL2",
+    "UNIOIL BF RESORT": "LL1",
+}
+
+_NORMALIZED_STORE_DOCUMENT_CLASS_MAPPING = {
+    " ".join(store.split()).casefold(): doc_class
+    for store, doc_class in STORE_DOCUMENT_CLASS_MAPPING.items()
 }
 
 _NORMALIZED_PAYMENT_METHOD_MAPPING = {
@@ -79,7 +90,7 @@ _NORMALIZED_PAYMENT_METHOD_MAPPING = {
 COLUMN_SUMMARY = [
     {
         "column": "SI Number",
-        "source": 'RR1 + payment-method letter + Business Date "MMDD"',
+        "source": 'Store Doc Class + payment-method letter + Business Date "MMDD"',
         "status": "computed",
     },
     {
@@ -119,8 +130,8 @@ COLUMN_SUMMARY = [
     },
     {
         "column": "Doc Class",
-        "source": "RR1",
-        "status": "hardcoded",
+        "source": "Store branch + location code",
+        "status": "computed",
     },
     {
         "column": "Currency Code",
@@ -138,7 +149,7 @@ FALLBACK_COLUMN_DEFAULTS = {
     "SI Number": {
         "default_value": "(generated from date/payment)",
         "value_type": "formula",
-        "description": "RR1 + payment-method letter + Business Date MMDD.",
+        "description": "Store Doc Class + payment-method letter + Business Date MMDD.",
     },
     "Invoice Date": {
         "default_value": "(from Business Date)",
@@ -176,9 +187,9 @@ FALLBACK_COLUMN_DEFAULTS = {
         "description": "Four-character text code selected from the payment-method mapping.",
     },
     "Doc Class": {
-        "default_value": "RR1",
-        "value_type": "string",
-        "description": "ERP document class for New POS rows.",
+        "default_value": "(from Store)",
+        "value_type": "formula",
+        "description": "ERP document class derived from the Store branch and location.",
     },
     "Currency Code": {
         "default_value": "PHP",
@@ -198,11 +209,11 @@ NATIVE_FORMULA_COLUMNS = {
     "Sales Discount",
     "VAT Payable",
     "Customer Code",
+    "Doc Class",
 }
 CONSTANT_COLUMNS = {
     "Product Code",
     "Quantity",
-    "Doc Class",
     "Currency Code",
     "Remarks",
 }
@@ -225,7 +236,7 @@ class NewPosTransformer:
         )
 
         native_records: list[dict[str, Any]] = []
-        maya_record_indexes: dict[date, int] = {}
+        maya_record_indexes: dict[tuple[date, str], int] = {}
         warnings: list[str] = []
         errors: list[str] = []
 
@@ -244,6 +255,14 @@ class NewPosTransformer:
                 warnings.append(
                     f"Row {row_position}: Business Date missing or invalid; "
                     "used today's date"
+                )
+
+            doc_class = _document_class_for_store(store)
+            if doc_class is None:
+                doc_class = "RR1"
+                warnings.append(
+                    f"Row {row_position}: Store {str(store).strip()!r} is unknown; "
+                    "used fallback Doc Class RR1"
                 )
 
             payment_details = _payment_method_details(payment_method)
@@ -283,7 +302,7 @@ class NewPosTransformer:
 
             native_record = {
                 "SI Number": (
-                    f"RR1{customer_letter}{business_date.strftime('%m%d')}"
+                    f"{doc_class}{customer_letter}{business_date.strftime('%m%d')}"
                 ),
                 "Invoice Date": business_date,
                 "Product Code": "0001",
@@ -292,13 +311,15 @@ class NewPosTransformer:
                 "Sales Discount": sales_discount,
                 "VAT Payable": vat_payable,
                 "Customer Code": customer_code,
-                "Doc Class": "RR1",
+                "Doc Class": doc_class,
                 "Currency Code": "PHP",
                 "Remarks": "",
+                "_Customer Letter": customer_letter,
+                "_Business Date": business_date,
             }
 
-            if _normalize_payment_method(payment_method) in MAYA_QR_PAYMENT_METHODS:
-                maya_key = business_date.date()
+            if _is_maya_payment_method(payment_method):
+                maya_key = (business_date.date(), _normalize_store(store))
                 existing_index = maya_record_indexes.get(maya_key)
                 if existing_index is None:
                     maya_record_indexes[maya_key] = len(native_records)
@@ -379,10 +400,30 @@ def _apply_column_defaults(
     defaults: dict[str, ColumnDefaultConfig],
 ) -> dict[str, Any]:
     output_record: dict[str, Any] = {}
+    doc_class_config = defaults["Doc Class"]
+    if _uses_native_logic("Doc Class", doc_class_config):
+        effective_doc_class = native_record["Doc Class"]
+    else:
+        effective_doc_class = _coerce_default_value(
+            doc_class_config.default_value,
+            doc_class_config.value_type,
+            FALLBACK_COLUMN_DEFAULTS["Doc Class"]["default_value"],
+        )
+
     for column in OUTPUT_COLUMNS:
         config = defaults[column]
+        if column == "Doc Class":
+            output_record[column] = effective_doc_class
+            continue
+
         if _uses_native_logic(column, config):
-            output_record[column] = native_record[column]
+            if column == "SI Number":
+                output_record[column] = (
+                    f"{effective_doc_class}{native_record['_Customer Letter']}"
+                    f"{native_record['_Business Date'].strftime('%m%d')}"
+                )
+            else:
+                output_record[column] = native_record[column]
             continue
 
         output_record[column] = _coerce_default_value(
@@ -478,10 +519,41 @@ def _normalize_payment_method(value: Any) -> str:
     return "".join(str(value).split()).casefold()
 
 
+def _normalize_store(value: Any) -> str:
+    return " ".join(str(value).split()).casefold()
+
+
+def _is_maya_payment_method(payment_method: Any) -> bool:
+    normalized = "".join(
+        character
+        for character in str(payment_method).casefold()
+        if character.isalnum()
+    )
+    return "card" in normalized or "ewallet" in normalized
+
+
 def _payment_method_details(payment_method: Any) -> dict[str, int | str] | None:
+    if _is_maya_payment_method(payment_method):
+        return MAYA_QR_DETAILS
     return _NORMALIZED_PAYMENT_METHOD_MAPPING.get(
         _normalize_payment_method(payment_method)
     )
+
+
+def _document_class_for_store(store: Any) -> str | None:
+    normalized = _normalize_store(store)
+    mapped = _NORMALIZED_STORE_DOCUMENT_CLASS_MAPPING.get(normalized)
+    if mapped is not None:
+        return mapped
+
+    # These aliases cover minor naming differences in exported store labels.
+    if "taytay" in normalized or "rizal" in normalized:
+        return "RR1"
+    if "slex" in normalized and "makati" in normalized:
+        return "MM1"
+    if "bf resort" in normalized and "las pinas" in normalized:
+        return "LL2"
+    return None
 
 
 def _contains_total(store: Any) -> bool:

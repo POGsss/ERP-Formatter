@@ -9,6 +9,9 @@ outputs/
 node_modules/
 .next/
 out/
+build/
+dist/
+.desktop-build/
 
 __pycache__/
 *.py[cod]

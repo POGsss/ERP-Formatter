@@ -113,3 +113,14 @@ docker compose down
 ```
 
 See [docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md) for VPS, domain, firewall, backup, restore, and update steps.
+
+## Windows Desktop Executable
+
+Build the one-file Windows desktop distribution with:
+
+```powershell
+.\scripts\build_desktop.ps1
+```
+
+See [docs/DESKTOP_BUILD.md](docs/DESKTOP_BUILD.md) for build prerequisites, clean-machine release
+verification, SmartScreen and antivirus behavior, code signing, and platform scope.
